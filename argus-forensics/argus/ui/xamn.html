@@ -1,0 +1,1303 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>ARGUS XAMN — Analysis</title>
+<style>
+:root{
+  --bg:#0e1116; --bg2:#151a22; --bg3:#1c232d; --line:#2a3340;
+  --fg:#dfe6ef; --fg2:#93a1b3; --fg3:#61707f;
+  --accent:#4ea8de; --accent2:#2b6cb0;
+  --warn:#e2b33c; --danger:#e5534b; --ok:#3fb950; --deleted:#c678dd;
+  --mono:ui-monospace,SFMono-Regular,"SF Mono",Menlo,Consolas,monospace;
+  --sans:-apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,Helvetica,Arial,sans-serif;
+}
+*{box-sizing:border-box;margin:0;padding:0}
+html,body{height:100%}
+body{background:var(--bg);color:var(--fg);font:13px/1.5 var(--sans);overflow:hidden}
+button,input,select{font:inherit;color:inherit}
+::-webkit-scrollbar{width:9px;height:9px}
+::-webkit-scrollbar-thumb{background:#2f3a47;border-radius:5px}
+::-webkit-scrollbar-track{background:transparent}
+
+#app{display:grid;grid-template-rows:auto auto 1fr auto;height:100vh}
+
+/* ---------- header ---------- */
+header{background:var(--bg2);border-bottom:1px solid var(--line);
+  padding:9px 14px;display:flex;align-items:center;gap:14px;flex-wrap:wrap}
+.brand{font-weight:700;letter-spacing:.08em;font-size:13px;color:var(--accent)}
+.brand span{color:var(--fg3);font-weight:400;letter-spacing:0}
+.meta{display:flex;gap:16px;flex-wrap:wrap;font-size:11.5px;color:var(--fg2)}
+.meta b{color:var(--fg);font-weight:600}
+.seal{margin-left:auto;display:flex;align-items:center;gap:7px;
+  font-size:11px;padding:4px 10px;border-radius:99px;border:1px solid var(--line)}
+.seal.ok{color:var(--ok);border-color:#1f4d2a;background:#112417}
+.seal.bad{color:var(--danger);border-color:#5a2320;background:#2a1413;cursor:pointer}
+.dot{width:7px;height:7px;border-radius:50%;background:currentColor}
+
+/* ---------- toolbar ---------- */
+.toolbar{background:var(--bg2);border-bottom:1px solid var(--line);
+  padding:8px 14px;display:flex;gap:10px;align-items:center}
+.tabs{display:flex;gap:2px;background:var(--bg3);padding:3px;border-radius:7px}
+.tab{padding:5px 11px;border:0;background:transparent;color:var(--fg2);
+  border-radius:5px;cursor:pointer;font-size:12px;white-space:nowrap}
+.tab:hover{color:var(--fg)}
+.tab.active{background:var(--accent2);color:#fff}
+.searchwrap{flex:1;position:relative;min-width:200px}
+#q{width:100%;background:var(--bg);border:1px solid var(--line);border-radius:7px;
+  padding:7px 11px 7px 30px;font-family:var(--mono);font-size:12px;outline:none}
+#q:focus{border-color:var(--accent)}
+.searchwrap::before{content:"⌕";position:absolute;left:10px;top:5px;
+  color:var(--fg3);font-size:15px}
+.btn{background:var(--bg3);border:1px solid var(--line);border-radius:6px;
+  padding:6px 12px;cursor:pointer;color:var(--fg2);font-size:12px;white-space:nowrap}
+.btn:hover{border-color:var(--accent);color:var(--fg)}
+.btn.primary{background:var(--accent2);border-color:var(--accent2);color:#fff}
+.hint{font-size:11px;color:var(--fg3);font-family:var(--mono)}
+
+/* ---------- layout ---------- */
+.body{display:grid;grid-template-columns:222px 1fr;overflow:hidden}
+aside{background:var(--bg2);border-right:1px solid var(--line);
+  overflow-y:auto;padding:10px 0}
+.group{margin-bottom:14px}
+.group h3{font-size:10px;text-transform:uppercase;letter-spacing:.1em;
+  color:var(--fg3);padding:5px 14px}
+.item{display:flex;justify-content:space-between;align-items:center;
+  padding:5px 14px;cursor:pointer;font-size:12px;color:var(--fg2);
+  border-left:2px solid transparent}
+.item:hover{background:var(--bg3);color:var(--fg)}
+.item.active{background:var(--bg3);color:var(--fg);border-left-color:var(--accent)}
+.count{font-family:var(--mono);font-size:10.5px;color:var(--fg3);
+  background:var(--bg);padding:1px 6px;border-radius:9px}
+main{overflow:auto;position:relative}
+
+/* ---------- table ---------- */
+table{width:100%;border-collapse:collapse;font-size:12px}
+thead th{position:sticky;top:0;background:var(--bg3);text-align:left;
+  padding:8px 10px;border-bottom:1px solid var(--line);font-weight:600;
+  color:var(--fg2);font-size:11px;white-space:nowrap;z-index:5;cursor:pointer;
+  user-select:none}
+thead th:hover{color:var(--fg)}
+tbody tr{border-bottom:1px solid #1b222c;cursor:pointer}
+tbody tr:hover{background:#182029}
+tbody tr.sel{background:#1b2c3d}
+td{padding:7px 10px;vertical-align:top;max-width:460px}
+td.wrap{white-space:pre-wrap;word-break:break-word}
+.mono{font-family:var(--mono);font-size:11px;color:var(--fg2)}
+.pill{display:inline-block;padding:1px 7px;border-radius:9px;font-size:10.5px;
+  border:1px solid var(--line);color:var(--fg2);white-space:nowrap}
+.pill.in{color:var(--ok);border-color:#1f4d2a}
+.pill.out{color:var(--accent);border-color:#1e4467}
+.pill.missed{color:var(--danger);border-color:#5a2320}
+.pill.del{color:var(--deleted);border-color:#4a2d57;background:#1e1424}
+.pill.warn{color:var(--warn);border-color:#4d411a}
+
+/* ---------- gallery ---------- */
+.gallery{display:grid;grid-template-columns:repeat(auto-fill,minmax(148px,1fr));
+  gap:9px;padding:12px}
+.card{background:var(--bg2);border:1px solid var(--line);border-radius:8px;
+  overflow:hidden;cursor:pointer}
+.card:hover{border-color:var(--accent)}
+.thumb{width:100%;height:120px;object-fit:cover;background:#0a0d12;display:block}
+.noimg{width:100%;height:120px;display:flex;align-items:center;justify-content:center;
+  color:var(--fg3);font-size:26px;background:#0a0d12}
+.cardmeta{padding:6px 8px;font-size:10.5px;color:var(--fg2)}
+.cardmeta .fn{color:var(--fg);white-space:nowrap;overflow:hidden;
+  text-overflow:ellipsis}
+
+/* ---------- graph ---------- */
+#graph{width:100%;height:100%;display:block;cursor:grab}
+#graph:active{cursor:grabbing}
+.gcontrols{position:absolute;top:12px;right:12px;z-index:10;background:var(--bg2);
+  border:1px solid var(--line);border-radius:8px;padding:10px;width:210px}
+.gcontrols label{display:block;font-size:11px;color:var(--fg2);margin:7px 0 3px}
+.gcontrols input[type=range]{width:100%}
+.gstat{font-size:10.5px;color:var(--fg3);font-family:var(--mono);margin-top:8px;
+  line-height:1.7}
+.legend{position:absolute;bottom:12px;left:12px;background:var(--bg2);
+  border:1px solid var(--line);border-radius:8px;padding:9px 12px;font-size:11px;
+  color:var(--fg2);z-index:10}
+.legend div{display:flex;align-items:center;gap:7px;margin:3px 0}
+.swatch{width:10px;height:10px;border-radius:50%}
+
+/* ---------- charts ---------- */
+.charts{padding:14px;display:grid;gap:14px;
+  grid-template-columns:repeat(auto-fit,minmax(320px,1fr))}
+.panel{background:var(--bg2);border:1px solid var(--line);border-radius:9px;
+  padding:13px}
+.panel h4{font-size:11px;text-transform:uppercase;letter-spacing:.09em;
+  color:var(--fg3);margin-bottom:11px;font-weight:600}
+.bars{display:flex;align-items:flex-end;gap:2px;height:110px}
+.bar{flex:1;background:linear-gradient(180deg,var(--accent),var(--accent2));
+  border-radius:2px 2px 0 0;min-height:2px;position:relative}
+.bar:hover{background:var(--warn)}
+.barlabels{display:flex;gap:2px;margin-top:5px;font-size:9px;color:var(--fg3)}
+.barlabels span{flex:1;text-align:center}
+.kv{display:grid;grid-template-columns:1fr auto;gap:5px 12px;font-size:12px}
+.kv dt{color:var(--fg2);overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.kv dd{font-family:var(--mono);color:var(--fg);text-align:right}
+.stat{font-size:26px;font-weight:600;font-family:var(--mono)}
+.stat small{font-size:11px;color:var(--fg3);font-weight:400;
+  display:block;text-transform:uppercase;letter-spacing:.08em;font-family:var(--sans)}
+
+/* ---------- conversations / attribution ---------- */
+.split{display:grid;grid-template-columns:280px 1fr;gap:0;height:100%;
+  min-height:420px}
+.threadbtn{display:block;width:100%;text-align:left;padding:9px 12px;
+  border:0;border-bottom:1px solid var(--line);background:transparent;
+  color:var(--fg2);cursor:pointer}
+.threadbtn:hover,.threadbtn.active{background:var(--bg3);color:var(--fg)}
+.turns{padding:14px;max-width:900px}
+.turn{margin:0 0 10px;padding:10px 12px;border-radius:9px;
+  background:var(--bg2);border:1px solid var(--line);max-width:78%}
+.turn.out{margin-left:auto;border-color:#2a4a6a;background:#152233}
+.turn .meta{font-size:10.5px;color:var(--fg3);margin-top:5px}
+.turn.deleted{border-color:#5a3a6a;background:#1a1420}
+.tagbar{display:flex;gap:8px;margin-top:10px;flex-wrap:wrap}
+.tagbar input{flex:1;min-width:120px;background:var(--bg);border:1px solid var(--line);
+  border-radius:6px;padding:6px 8px;font-size:12px}
+.fusionline{padding:8px 10px;border-bottom:1px solid var(--line);font-size:12px}
+.fusionline b{color:var(--accent)}
+
+/* ---------- detail ---------- */
+#detail{position:fixed;top:0;right:0;width:430px;height:100vh;background:var(--bg2);
+  border-left:1px solid var(--line);transform:translateX(100%);
+  transition:transform .16s ease;z-index:40;display:flex;flex-direction:column}
+#detail.open{transform:none;box-shadow:-16px 0 40px rgba(0,0,0,.45)}
+.dhead{padding:12px 14px;border-bottom:1px solid var(--line);display:flex;
+  align-items:flex-start;gap:10px}
+.dhead h3{font-size:13px;flex:1}
+.dbody{flex:1;overflow-y:auto;padding:14px}
+.dsec{margin-bottom:16px}
+.dsec h5{font-size:10px;text-transform:uppercase;letter-spacing:.09em;
+  color:var(--fg3);margin-bottom:7px}
+.drow{display:grid;grid-template-columns:112px 1fr;gap:4px 10px;font-size:11.5px;
+  padding:3px 0;border-bottom:1px solid #1b222c}
+.drow b{color:var(--fg2);font-weight:500}
+.drow span{font-family:var(--mono);word-break:break-word;font-size:11px}
+.msgbody{background:var(--bg);border:1px solid var(--line);border-radius:7px;
+  padding:10px;white-space:pre-wrap;word-break:break-word;font-size:12.5px;
+  max-height:280px;overflow:auto}
+#detail img.preview{width:100%;border-radius:7px;border:1px solid var(--line)}
+
+/* ---------- misc ---------- */
+footer{background:var(--bg2);border-top:1px solid var(--line);padding:5px 14px;
+  font-size:11px;color:var(--fg3);display:flex;gap:16px;align-items:center;
+  font-family:var(--mono)}
+.empty{padding:52px;text-align:center;color:var(--fg3)}
+.empty b{display:block;color:var(--fg2);margin-bottom:6px;font-size:14px}
+.loading{padding:40px;text-align:center;color:var(--fg3)}
+.err{margin:14px;padding:11px 13px;border:1px solid #5a2320;background:#2a1413;
+  border-radius:7px;color:#f0a29c;font-size:12px;font-family:var(--mono)}
+.logline{padding:3px 14px;font-family:var(--mono);font-size:11px;
+  border-bottom:1px solid #1b222c;display:grid;
+  grid-template-columns:170px 130px 74px 1fr;gap:10px}
+.logline.error{color:#f0a29c;background:#1e1211}
+.logline.warning{color:#e8cf88}
+.map{position:relative;width:100%;height:100%;background:#0a0d12}
+.mappt{position:absolute;width:9px;height:9px;border-radius:50%;
+  background:var(--warn);border:1.5px solid #0a0d12;cursor:pointer;
+  transform:translate(-50%,-50%)}
+.mappt:hover{background:var(--danger);width:13px;height:13px}
+
+/* ---------- responsive / polish ---------- */
+@media (max-width: 900px) {
+  .body{grid-template-columns:1fr}
+  aside{display:none}
+  .toolbar{flex-wrap:wrap}
+  .searchwrap{min-width:100%;order:3}
+}
+.query-chips{display:flex;flex-wrap:wrap;gap:6px;justify-content:center;margin-top:12px}
+.query-chip{font-size:11px;padding:4px 10px;border-radius:99px;border:1px solid var(--line);
+  background:var(--bg3);color:var(--fg2);cursor:pointer}
+.query-chip:hover{border-color:var(--accent);color:var(--fg)}
+#connStat{font-size:11px;color:var(--fg3);margin-right:12px}
+#connStat.warn{color:var(--warn)}
+</style>
+</head>
+<body>
+<div id="app">
+  <header>
+    <div class="brand">ARGUS <span>XAMN</span></div>
+    <div class="meta" id="meta"></div>
+    <div class="seal" id="seal"><span class="dot"></span><span>checking…</span></div>
+  </header>
+
+  <div class="toolbar">
+    <div class="tabs" id="tabs"></div>
+    <div class="searchwrap">
+      <input id="q" placeholder='AQL — e.g.  category:Messages AND deleted:true' spellcheck="false">
+    </div>
+    <button class="btn primary" id="run">Search</button>
+    <button class="btn" id="clear">Clear</button>
+    <span class="hint" id="qhint"></span>
+  </div>
+
+  <div class="body">
+    <aside id="side"></aside>
+    <main id="main"><div class="loading">Loading case…</div></main>
+  </div>
+
+  <footer>
+    <span id="connStat"></span>
+    <span id="fstat">—</span>
+    <span id="fsel"></span>
+    <span style="margin-left:auto" id="ftime"></span>
+  </footer>
+</div>
+
+<div id="detail">
+  <div class="dhead">
+    <h3 id="dtitle">Artifact</h3>
+    <button class="btn" onclick="closeDetail()">✕</button>
+  </div>
+  <div class="dbody" id="dbody"></div>
+</div>
+
+<script>
+"use strict";
+
+/* This view is served two ways: standalone by `argus analyze` (where the
+   server already knows which containers are loaded and needs no token), and
+   embedded in the Workbench (where it must say which containers it wants and
+   present the session token). Both are handled by forwarding whatever
+   parameters we were given. */
+const QP        = new URLSearchParams(location.search);
+const TOKEN     = QP.get("token") || "";
+const CONTAINERS = QP.get("containers") || "";
+const BLOB_BASE = "/blob/";
+
+function apiUrl(p) {
+  const [path, existing] = p.split("?");
+  const params = new URLSearchParams(existing || "");
+  if (TOKEN && !params.has("token")) params.set("token", TOKEN);
+  if (CONTAINERS && !params.has("containers")) params.set("containers", CONTAINERS);
+  const qs = params.toString();
+  return "/api/" + path + (qs ? "?" + qs : "");
+}
+const API = async (p, opts = {}) => {
+  const tries = opts.retries ?? 3;
+  let lastErr = null;
+  for (let i = 0; i < tries; i++) {
+    try {
+      const r = await fetch(apiUrl(p));
+      if (!r.ok) {
+        let msg = `HTTP ${r.status}`;
+        try { msg = (await r.json()).error || msg; } catch (_) {}
+        throw new Error(msg);
+      }
+      setConnStatus("ok");
+      return r.json();
+    } catch (e) {
+      lastErr = e;
+      if (i < tries - 1) {
+        setConnStatus("warn", "Reconnecting…");
+        await new Promise(res => setTimeout(res, 400 * (i + 1)));
+      }
+    }
+  }
+  setConnStatus("bad", lastErr?.message || "offline");
+  throw lastErr;
+};
+
+function setConnStatus(kind, msg) {
+  const el = $("#connStat");
+  if (!el) return;
+  if (kind === "ok") { el.textContent = ""; el.className = ""; return; }
+  el.className = kind === "warn" ? "warn" : "bad";
+  el.textContent = msg || "Connection lost";
+}
+
+const SUGGESTED_QUERIES = [
+  "category:Messages",
+  "deleted:true",
+  "category:Contacts",
+  "has:gps",
+  "category:Pictures",
+];
+
+function emptySearchHtml() {
+  return `<div class="empty"><b>No artifacts matched</b>
+    Try a broader query, or check the Deleted view for carved records.
+    <div class="query-chips">${
+      SUGGESTED_QUERIES.map(q =>
+        `<button type="button" class="query-chip" data-q="${esc(q)}">${esc(q)}</button>`
+      ).join("")
+    }</div></div>`;
+}
+
+function wireQueryChips(host) {
+  host?.querySelectorAll(".query-chip").forEach(btn => {
+    btn.onclick = () => {
+      $("#q").value = btn.dataset.q;
+      S.query = btn.dataset.q;
+      route();
+    };
+  });
+}
+async function API_POST(path, body) {
+  const params = new URLSearchParams();
+  if (TOKEN) params.set("token", TOKEN);
+  const url = "/api/" + path + (params.toString() ? "?" + params : "");
+  const payload = { ...body, token: TOKEN };
+  if (CONTAINERS) payload.containers = CONTAINERS.split("\n").filter(Boolean);
+  const r = await fetch(url, { method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(payload) });
+  if (!r.ok) {
+    let msg = `HTTP ${r.status}`;
+    try { msg = (await r.json()).error || msg; } catch (_) {}
+    throw new Error(msg);
+  }
+  return r.json();
+}
+function blobUrl(sha) {
+  const params = new URLSearchParams();
+  if (TOKEN) params.set("token", TOKEN);
+  if (CONTAINERS) params.set("containers", CONTAINERS);
+  const qs = params.toString();
+  return BLOB_BASE + sha + (qs ? "?" + qs : "");
+}
+const $  = s => document.querySelector(s);
+const el = (t, c, x) => { const n = document.createElement(t);
+  if (c) n.className = c; if (x !== undefined) n.textContent = x; return n; };
+const esc = s => String(s ?? "").replace(/[&<>"]/g,
+  c => ({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;"}[c]));
+const num = n => (n ?? 0).toLocaleString();
+
+const VIEWS = [
+  ["overview",    "Overview"],
+  ["messages",    "Messages"],
+  ["calls",       "Calls"],
+  ["contacts",    "Contacts"],
+  ["conversations", "Conversations"],
+  ["gallery",     "Pictures & Videos"],
+  ["connections", "Connection"],
+  ["timeline",    "Timeline"],
+  ["places",      "Places"],
+  ["deleted",     "Deleted"],
+  ["fusion",      "Attribution"],
+  ["media",       "Media matches"],
+  ["apps",        "Applications"],
+  ["log",         "Extraction log"],
+];
+
+const S = { view: "overview", overview: null, query: "", sel: null,
+            sortCol: null, sortDir: 1, rows: [] };
+
+/* ============================ boot ============================ */
+(async function boot(){
+  buildTabs();
+  if (!CONTAINERS) {
+    $("#main").innerHTML = `<div class="err"><b>No extraction loaded</b>
+      Open this view from the ARGUS workbench after selecting at least one container.</div>`;
+    $("#fstat").textContent = "No containers";
+    return;
+  }
+  try {
+    S.overview = await API("overview");
+    renderHeader(); renderSide(); await route();
+    const deepArtifact = QP.get("artifact");
+    if (deepArtifact) await openDetail(deepArtifact);
+    const bootQuery = QP.get("q");
+    if (bootQuery) { $("#q").value = bootQuery; S.query = bootQuery; route(); }
+  } catch (e) { $("#main").innerHTML =
+    `<div class="err">Could not load the case: ${esc(e.message)}</div>`; }
+
+  $("#run").onclick = () => { S.query = $("#q").value.trim(); route(); };
+  $("#clear").onclick = () => { $("#q").value = ""; S.query = ""; route(); };
+  $("#q").onkeydown = e => { if (e.key === "Enter") $("#run").click(); };
+  document.onkeydown = e => {
+    if (e.key === "Escape") closeDetail();
+    if (e.key === "/" && document.activeElement !== $("#q")) {
+      e.preventDefault(); $("#q").focus(); }
+  };
+  setInterval(() => $("#ftime").textContent = new Date().toLocaleTimeString(), 1000);
+})();
+
+function buildTabs(){
+  const t = $("#tabs");
+  VIEWS.forEach(([id, label]) => {
+    const b = el("button", "tab" + (id === S.view ? " active" : ""), label);
+    b.onclick = () => { S.view = id;
+      [...t.children].forEach(c => c.classList.remove("active"));
+      b.classList.add("active"); route(); };
+    t.appendChild(b);
+  });
+}
+
+function renderHeader(){
+  const o = S.overview, d = o.device || {};
+  $("#meta").innerHTML =
+    `<span>Case <b>${esc(o.case_id || "—")}</b></span>` +
+    `<span>Exhibit <b>${esc(o.exhibit_id || "—")}</b></span>` +
+    `<span>Operator <b>${esc(o.operator || "—")}</b></span>` +
+    `<span>Device <b>${esc([d.make, d.model, d.os].filter(Boolean).join(" ") || "—")}</b></span>` +
+    `<span>Method <b>${esc(o.method || "—")}</b></span>` +
+    `<span>Artifacts <b>${num(o.total_artifacts)}</b></span>`;
+
+  const ok = o.integrity && o.integrity.ok;
+  const s = $("#seal");
+  s.className = "seal " + (ok ? "ok" : "bad");
+  s.innerHTML = `<span class="dot"></span><span>${ok
+      ? "Integrity verified" : "Integrity FAILED — click"}</span>`;
+  if (!ok) s.onclick = () => showIntegrity();
+}
+
+function renderSide(){
+  const o = S.overview, side = $("#side");
+  side.innerHTML = "";
+
+  const g1 = el("div", "group");
+  g1.appendChild(el("h3", null, "Categories"));
+  Object.entries(o.categories || {}).forEach(([cat, n]) => {
+    const it = el("div", "item");
+    it.appendChild(el("span", null, cat));
+    it.appendChild(el("span", "count", num(n)));
+    it.onclick = () => { $("#q").value = S.query = `category:"${cat}"`;
+      S.view = "search"; route(); };
+    g1.appendChild(it);
+  });
+  side.appendChild(g1);
+
+  const rec = o.recovery || {};
+  const del = o.deleted_recovered || 0;
+  if (del > 0){
+    const g0 = el("div", "group");
+    g0.appendChild(el("h3", null, "Recovery"));
+    Object.entries(rec).forEach(([k, n]) => {
+      const it = el("div", "item");
+      it.appendChild(el("span", null, k));
+      it.appendChild(el("span", "count", num(n)));
+      it.onclick = () => { $("#q").value = S.query = `recovery:${k}`;
+        S.view = "search"; route(); };
+      g0.appendChild(it);
+    });
+    side.appendChild(g0);
+  }
+
+  const g2 = el("div", "group");
+  g2.appendChild(el("h3", null, "Applications"));
+  Object.entries(o.applications || {}).slice(0, 22).forEach(([app, n]) => {
+    const it = el("div", "item");
+    it.appendChild(el("span", null, app));
+    it.appendChild(el("span", "count", num(n)));
+    it.onclick = () => { $("#q").value = S.query = `app:"${app}"`;
+      S.view = "search"; route(); };
+    g2.appendChild(it);
+  });
+  side.appendChild(g2);
+}
+
+/* ============================ routing ============================ */
+async function route(){
+  const m = $("#main");
+  m.innerHTML = '<div class="loading">Working…</div>';
+  $("#qhint").textContent = "";
+  try {
+    switch (S.view) {
+      case "overview":    return viewOverview(m);
+      case "messages":    return viewList(m, 'category:Messages');
+      case "calls":       return viewList(m, 'category:Calls');
+      case "contacts":    return viewColumn(m, "Contacts");
+      case "conversations": return viewConversations(m);
+      case "gallery":     return viewGallery(m);
+      case "connections": return viewGraph(m);
+      case "timeline":    return viewTimeline(m);
+      case "places":      return viewPlaces(m);
+      case "deleted":     return viewList(m, "deleted:true");
+      case "fusion":      return viewFusion(m);
+      case "media":       return viewMedia(m);
+      case "apps":        return viewApps(m);
+      case "log":         return viewLog(m);
+      default:            return viewList(m, S.query);
+    }
+  } catch (e) {
+    m.innerHTML = `<div class="err">${esc(e.message || e)}</div>`;
+  }
+}
+
+/* ============================ overview ============================ */
+function viewOverview(m){
+  const o = S.overview, d = o.device || {};
+  const cats = Object.entries(o.categories || {});
+  const apps = Object.entries(o.applications || {}).slice(0, 14);
+
+  m.innerHTML = "";
+  const wrap = el("div", "charts");
+
+  wrap.appendChild(panel("Case", `
+    ${kv("Case ID", o.case_id)}${kv("Exhibit", o.exhibit_id)}
+    ${kv("Operator", o.operator)}${kv("Method", o.method)}
+    ${kv("Time span", o.time_span)}${kv("Started", o.started_at)}
+    ${kv("Finished", o.finished_at)}${kv("Seal", o.encryption_level)}`));
+
+  wrap.appendChild(panel("Device", `
+    ${kv("Make", d.make)}${kv("Model", d.model)}${kv("OS", d.os)}
+    ${kv("Serial", d.serial)}${kv("IMEI", d.imei)}${kv("ICCID", d.iccid)}
+    ${kv("Number", d.phone_number)}${kv("Lock state", d.lock_state)}`));
+
+  const stats = el("div", "panel");
+  stats.innerHTML = `<h4>Totals</h4>
+    <div style="display:grid;grid-template-columns:1fr 1fr;gap:14px">
+      <div class="stat">${num(o.total_artifacts)}<small>Artifacts</small></div>
+      <div class="stat" style="color:var(--deleted)">${num(o.deleted_recovered)}<small>Deleted recovered</small></div>
+      <div class="stat" style="font-size:14px">${esc(o.first_activity || "—")}<small>First activity</small></div>
+      <div class="stat" style="font-size:14px">${esc(o.last_activity || "—")}<small>Last activity</small></div>
+    </div>`;
+  wrap.appendChild(stats);
+
+  wrap.appendChild(panel("Artifact categories",
+    `<dl class="kv">${cats.map(([k, v]) =>
+      `<dt>${esc(k)}</dt><dd>${num(v)}</dd>`).join("")}</dl>`));
+
+  wrap.appendChild(panel("Applications",
+    `<dl class="kv">${apps.map(([k, v]) =>
+      `<dt>${esc(k)}</dt><dd>${num(v)}</dd>`).join("")}</dl>`));
+
+  const tags = o.tags || [];
+  if (tags.length) {
+    wrap.appendChild(panel("Analyst tags",
+      `<div class="taglist">${tags.map(t =>
+        `<span class="pill" style="border-color:${esc(t.colour || '#e2b33c')}">${
+          esc(t.name)} (${t.count})</span>`).join("")}</div>
+        <div style="margin-top:8px;font-size:11px;color:var(--fg3)">
+          Filter with <code>tag:TagName</code> in the search box.</div>`));
+  }
+
+  const src = (o.data_sources || []).slice(0, 16);
+  wrap.appendChild(panel("Data sources",
+    src.length ? `<dl class="kv">${src.map(s =>
+      `<dt title="${esc(s.path)}">${esc(s.path.split("/").pop())}</dt>
+       <dd>${num(s.count)}</dd>`).join("")}</dl>`
+    : '<div style="color:var(--fg3)">No sources recorded.</div>'));
+
+  m.appendChild(wrap);
+  $("#fstat").textContent =
+    `${num(o.total_artifacts)} artifacts · ${cats.length} categories · ` +
+    `${num(o.deleted_recovered)} recovered from deleted space`;
+}
+
+const panel = (title, html) => {
+  const p = el("div", "panel");
+  p.innerHTML = `<h4>${esc(title)}</h4>${html}`;
+  return p;
+};
+const kv = (k, v) => `<div class="drow"><b>${esc(k)}</b><span>${esc(v || "—")}</span></div>`;
+
+/* ============================ list view ============================ */
+async function viewList(m, baseQuery){
+  const q = [baseQuery, S.query].filter(Boolean).join(" AND ");
+  const r = await API("search?limit=800&q=" + encodeURIComponent(q));
+  S.rows = r.artifacts || [];
+  $("#qhint").textContent = r.sql_where ? "" : "";
+  $("#fstat").textContent =
+    `${num(r.returned)} of ${num(r.total)} artifacts · query: ${q || "(all)"}`;
+
+  if (!S.rows.length) {
+    m.innerHTML = emptySearchHtml();
+    wireQueryChips(m);
+    return;
+  }
+
+  const cols = [
+    ["Time",      a => a.timestamp_iso],
+    ["Category",  a => a.category],
+    ["Type",      a => a.subtype],
+    ["Direction", a => a.direction],
+    ["Party",     a => (a.parties || []).filter(p => !p.is_owner)
+                        .map(p => p.label).join(", ")],
+    ["Content",   a => a.body || a.attributes?.filename || ""],
+    ["App",       a => a.app],
+    ["State",     a => a.is_deleted ? a.recovery : ""],
+  ];
+  m.innerHTML = "";
+  m.appendChild(buildTable(cols, S.rows));
+}
+
+function buildTable(cols, rows){
+  const t = el("table");
+  const thead = el("thead"), tr = el("tr");
+  cols.forEach(([label], i) => {
+    const th = el("th", null, label + (S.sortCol === i
+      ? (S.sortDir > 0 ? "  ▲" : "  ▼") : ""));
+    th.onclick = () => {
+      S.sortDir = S.sortCol === i ? -S.sortDir : 1;
+      S.sortCol = i;
+      rows.sort((a, b) => {
+        const x = String(cols[i][1](a) ?? ""), y = String(cols[i][1](b) ?? "");
+        return x.localeCompare(y, undefined, {numeric:true}) * S.sortDir; });
+      const main = $("#main"); main.innerHTML = ""; main.appendChild(buildTable(cols, rows));
+    };
+    tr.appendChild(th);
+  });
+  thead.appendChild(tr); t.appendChild(thead);
+
+  const tb = el("tbody");
+  rows.forEach(a => {
+    const row = el("tr");
+    row.dataset.id = a.artifact_id;
+    cols.forEach(([label, fn]) => {
+      const td = el("td");
+      const v = fn(a) ?? "";
+      if (label === "Direction" && v) {
+        td.innerHTML = `<span class="pill ${
+          v === "incoming" ? "in" : v === "outgoing" ? "out" :
+          v === "missed" ? "missed" : ""}">${esc(v)}</span>`;
+      } else if (label === "State" && v) {
+        td.innerHTML = `<span class="pill del">${esc(v)}</span>` +
+          (a.confidence < 1 ? ` <span class="mono">${a.confidence}</span>` : "");
+      } else if (label === "Time") {
+        td.className = "mono"; td.textContent = v;
+      } else if (label === "Content") {
+        td.className = "wrap"; td.textContent = String(v).slice(0, 300);
+      } else {
+        td.textContent = v;
+      }
+      row.appendChild(td);
+    });
+    row.onclick = () => selectRow(row, a.artifact_id);
+    tb.appendChild(row);
+  });
+  t.appendChild(tb);
+  return t;
+}
+
+/* ============================ column view ============================ */
+async function viewColumn(m, category){
+  const r = await API("column?category=" + encodeURIComponent(category));
+  $("#fstat").textContent = `${num(r.count)} ${r.category} records (column view)`;
+  if (!r.rows.length) return m.innerHTML =
+    `<div class="empty"><b>No ${esc(category)} in this extraction</b></div>`;
+
+  const t = el("table"), thead = el("thead"), tr = el("tr");
+  r.columns.forEach(c => tr.appendChild(el("th", null, c)));
+  thead.appendChild(tr); t.appendChild(thead);
+  const tb = el("tbody");
+  r.rows.forEach(row => {
+    const trr = el("tr");
+    r.columns.forEach(c => {
+      const td = el("td", c === "Time" ? "mono" : "wrap");
+      td.textContent = row[c] ?? "";
+      trr.appendChild(td);
+    });
+    trr.onclick = () => selectRow(trr, row.artifact_id);
+    tb.appendChild(trr);
+  });
+  t.appendChild(tb);
+  m.innerHTML = ""; m.appendChild(t);
+}
+
+/* ============================ gallery ============================ */
+async function viewGallery(m){
+  const r = await API("gallery?limit=400");
+  $("#fstat").textContent = `${num(r.returned)} of ${num(r.total)} media files`;
+  if (!r.items.length) return m.innerHTML =
+    `<div class="empty"><b>No pictures or videos</b>
+     The extraction may have excluded the Files &amp; Media category.</div>`;
+
+  const g = el("div", "gallery");
+  r.items.forEach(it => {
+    const c = el("div", "card");
+    if (it.blob_sha256 && (it.mime_type || "").startsWith("image/")) {
+      const img = el("img", "thumb");
+      img.loading = "lazy";
+      img.src = blobUrl(it.blob_sha256);
+      img.onerror = () => { img.replaceWith(noimg(it)); };
+      c.appendChild(img);
+    } else c.appendChild(noimg(it));
+    const meta = el("div", "cardmeta");
+    meta.innerHTML =
+      `<div class="fn" title="${esc(it.filename)}">${esc(it.filename || "(no name)")}</div>
+       <div class="mono">${esc(it.size_display || "")} ${it.dimensions ? "· " + esc(it.dimensions) : ""}</div>
+       <div class="mono">${esc(it.app || "")}</div>
+       ${it.latitude != null ? '<span class="pill warn">GPS</span> ' : ""}
+       ${it.attributes?.extension_mismatch ? '<span class="pill missed">type mismatch</span>' : ""}`;
+    c.appendChild(meta);
+    c.onclick = () => openDetail(it.artifact_id);
+    g.appendChild(c);
+  });
+  m.innerHTML = ""; m.appendChild(g);
+}
+const noimg = it => {
+  const d = el("div", "noimg");
+  d.textContent = (it.subtype === "Video") ? "▶" : "▤";
+  return d;
+};
+
+/* ============================ connection graph ============================ */
+async function viewGraph(m){
+  m.innerHTML = "";
+  m.style.position = "relative";
+  const controls = el("div", "gcontrols");
+  controls.innerHTML = `
+    <label>Scope</label>
+    <select id="gscope" class="btn" style="width:100%">
+      <option value="all">All communications</option>
+      <option value="calls">Calls only</option>
+      <option value="messages">Messages only</option>
+    </select>
+    <label>Minimum link weight: <span id="gwv">1</span></label>
+    <input type="range" id="gw" min="1" max="25" value="1">
+    <div class="gstat" id="gstat"></div>`;
+  const svg = document.createElementNS("http://www.w3.org/2000/svg", "svg");
+  svg.id = "graph";
+  const legend = el("div", "legend");
+  legend.innerHTML = `
+    <div><span class="swatch" style="background:#e2b33c"></span>Device owner</div>
+    <div><span class="swatch" style="background:#4ea8de"></span>Contact</div>
+    <div><span class="swatch" style="background:#c678dd"></span>Broker (bridges clusters)</div>
+    <div style="color:var(--fg3);margin-top:6px">Node size = artifact count · drag to move</div>`;
+  m.append(svg, controls, legend);
+
+  const load = async () => {
+    const scope = $("#gscope").value, w = $("#gw").value;
+    $("#gwv").textContent = w;
+    const data = await API(`connections?scope=${scope}&min_weight=${w}&max_nodes=260`);
+    drawGraph(svg, data);
+    $("#gstat").innerHTML =
+      `nodes ${data.stats.shown_nodes}/${data.stats.total_nodes}<br>` +
+      `links ${data.stats.shown_edges}/${data.stats.total_edges}<br>` +
+      `clusters ${data.stats.components}`;
+    $("#fstat").textContent =
+      `Connection view — ${data.stats.shown_nodes} parties, ` +
+      `${data.stats.shown_edges} links` +
+      (data.brokers?.length ? ` · top broker: ${data.brokers[0].label}` : "");
+  };
+  $("#gscope").onchange = load;
+  $("#gw").oninput = load;
+  await load();
+}
+
+function drawGraph(svg, data){
+  const W = svg.clientWidth || 900, H = svg.clientHeight || 600;
+  svg.setAttribute("viewBox", `0 0 ${W} ${H}`);
+  svg.innerHTML = "";
+  const nodes = data.nodes.map(n => ({...n,
+    x: W/2 + (Math.random()-0.5)*W*0.6,
+    y: H/2 + (Math.random()-0.5)*H*0.6, vx:0, vy:0}));
+  const index = Object.fromEntries(nodes.map((n,i) => [n.key, i]));
+  const links = data.edges
+    .filter(e => index[e.source] !== undefined && index[e.target] !== undefined)
+    .map(e => ({...e, s: index[e.source], t: index[e.target]}));
+  if (!nodes.length){
+    svg.innerHTML = `<text x="${W/2}" y="${H/2}" text-anchor="middle"
+      fill="#61707f" font-size="14">No communication links in scope</text>`;
+    return;
+  }
+
+  const maxW = Math.max(...links.map(l => l.artifact_count), 1);
+  const maxC = Math.max(...nodes.map(n => n.artifact_count), 1);
+  const brokers = new Set((data.brokers || []).slice(0,5).map(b => b.key));
+
+  /* Fruchterman–Reingold style layout: repulsion between all nodes,
+     spring attraction along links, cooling schedule. Run synchronously —
+     a few hundred nodes converge in well under a second. */
+  const k = Math.sqrt((W * H) / nodes.length) * 0.62;
+  for (let iter = 0; iter < 260; iter++){
+    const temp = (1 - iter / 260) * (W / 12);
+    for (let i = 0; i < nodes.length; i++){
+      let fx = 0, fy = 0;
+      for (let j = 0; j < nodes.length; j++){
+        if (i === j) continue;
+        let dx = nodes[i].x - nodes[j].x, dy = nodes[i].y - nodes[j].y;
+        let d2 = dx*dx + dy*dy || 0.01;
+        const f = (k*k) / d2;
+        fx += dx * f; fy += dy * f;
+      }
+      // gentle pull to centre keeps disconnected clusters on screen
+      fx += (W/2 - nodes[i].x) * 0.006;
+      fy += (H/2 - nodes[i].y) * 0.006;
+      nodes[i].vx = fx; nodes[i].vy = fy;
+    }
+    links.forEach(l => {
+      const a = nodes[l.s], b = nodes[l.t];
+      let dx = a.x - b.x, dy = a.y - b.y;
+      const d = Math.sqrt(dx*dx + dy*dy) || 0.01;
+      const f = (d*d) / k * (0.4 + 0.6 * l.artifact_count / maxW);
+      const ux = dx/d*f, uy = dy/d*f;
+      a.vx -= ux; a.vy -= uy; b.vx += ux; b.vy += uy;
+    });
+    nodes.forEach(n => {
+      const d = Math.sqrt(n.vx*n.vx + n.vy*n.vy) || 1;
+      n.x += (n.vx/d) * Math.min(d, temp);
+      n.y += (n.vy/d) * Math.min(d, temp);
+      n.x = Math.max(34, Math.min(W-34, n.x));
+      n.y = Math.max(34, Math.min(H-34, n.y));
+    });
+  }
+
+  const NS = "http://www.w3.org/2000/svg";
+  const mk = (t, attrs) => { const e = document.createElementNS(NS, t);
+    for (const [k2,v] of Object.entries(attrs)) e.setAttribute(k2, v); return e; };
+
+  const gLinks = mk("g", {});
+  links.forEach(l => {
+    const a = nodes[l.s], b = nodes[l.t];
+    const line = mk("line", {x1:a.x, y1:a.y, x2:b.x, y2:b.y,
+      stroke: l.calls > l.messages ? "#3d6b8f" : "#3b4a5c",
+      "stroke-width": Math.max(0.7, Math.min(6, l.artifact_count / maxW * 6)),
+      "stroke-opacity": 0.65});
+    const title = mk("title", {});
+    title.textContent =
+      `${nodes[l.s].label} ↔ ${nodes[l.t].label}\n` +
+      `${l.artifact_count} artifacts (${l.calls} calls, ${l.messages} messages)\n` +
+      `reciprocity ${l.reciprocity}`;
+    line.appendChild(title);
+    gLinks.appendChild(line);
+  });
+  svg.appendChild(gLinks);
+
+  const gNodes = mk("g", {});
+  nodes.forEach(n => {
+    const r = 5 + Math.sqrt(n.artifact_count / maxC) * 17;
+    const g = mk("g", {transform:`translate(${n.x},${n.y})`,
+      style:"cursor:pointer"});
+    const fill = n.is_owner ? "#e2b33c"
+               : brokers.has(n.key) ? "#c678dd" : "#4ea8de";
+    const c = mk("circle", {r, fill, "fill-opacity":0.85,
+      stroke:"#0e1116", "stroke-width":1.6});
+    const title = mk("title", {});
+    title.textContent =
+      `${n.label}\n${n.artifact_count} artifacts ` +
+      `(${n.calls} calls, ${n.messages} messages)\n` +
+      `${n.degree} distinct parties · betweenness ${n.betweenness}\n` +
+      `apps: ${Object.keys(n.apps || {}).join(", ")}`;
+    c.appendChild(title);
+    g.appendChild(c);
+    if (r > 8 || n.is_owner){
+      const label = mk("text", {y: r + 12, "text-anchor":"middle",
+        fill:"#93a1b3", "font-size":10.5});
+      label.textContent = (n.label || "").slice(0, 22);
+      g.appendChild(label);
+    }
+    g.onclick = () => {
+      if (n.is_owner) return;
+      $("#q").value = S.query = `party:"${n.identifiers?.[0] || n.label}"`;
+      S.view = "search"; route();
+    };
+    gNodes.appendChild(g);
+  });
+  svg.appendChild(gNodes);
+}
+
+/* ============================ timeline ============================ */
+async function viewTimeline(m){
+  const st = await API("statistics?q=" + encodeURIComponent(S.query));
+  const h = st.histogram || {};
+  m.innerHTML = "";
+  const wrap = el("div", "charts");
+
+  const s1 = el("div", "panel");
+  s1.innerHTML = `<h4>Summary</h4>
+    <div style="display:grid;grid-template-columns:1fr 1fr;gap:14px">
+      <div class="stat">${num(st.total_artifacts)}<small>Artifacts</small></div>
+      <div class="stat">${st.span_days}<small>Days covered</small></div>
+      <div class="stat" style="color:var(--deleted)">${num(st.deleted_recovered)}<small>Deleted recovered</small></div>
+      <div class="stat" style="font-size:16px">${esc(st.total_call_display || "—")}<small>Total call time</small></div>
+    </div>
+    <div style="margin-top:12px">
+      ${kv("First activity", st.first_activity)}
+      ${kv("Last activity", st.last_activity)}
+      ${kv("Night activity", (st.histogram?.night_activity_pct ?? 0) + "% (00:00–06:00)")}
+      ${kv("Undated artifacts", num(st.undated))}
+    </div>`;
+  wrap.appendChild(s1);
+
+  wrap.appendChild(barPanel("Activity by hour of day",
+    (h.by_hour || []).map(x => x.count),
+    (h.by_hour || []).map(x => x.hour % 6 === 0 ? x.hour : "")));
+
+  wrap.appendChild(barPanel("Activity by day of week",
+    (h.by_weekday || []).map(x => x.count),
+    (h.by_weekday || []).map(x => x.day.slice(0,3))));
+
+  const days = (h.by_day || []).slice(-90);
+  wrap.appendChild(barPanel(`Activity by day (last ${days.length})`,
+    days.map(x => x.count),
+    days.map((x, i) => i % 15 === 0 ? x.date.slice(5) : "")));
+
+  if ((st.bursts || []).length){
+    wrap.appendChild(panel("Activity bursts",
+      `<dl class="kv">${st.bursts.slice(0,10).map(b =>
+        `<dt title="${esc(b.top_parties.join(', '))}">${esc(b.start_iso.slice(0,16))}
+          · ${b.duration_minutes}m</dt><dd>${b.count}</dd>`).join("")}</dl>`));
+  }
+  if ((st.gaps || []).length){
+    wrap.appendChild(panel("Longest silences",
+      `<dl class="kv">${st.gaps.slice(0,10).map(g =>
+        `<dt>${esc(g.from_iso.slice(0,16))} →</dt><dd>${g.hours}h</dd>`).join("")}</dl>`));
+  }
+  if ((st.anomalies || []).length){
+    wrap.appendChild(panel("Timestamp anomalies",
+      `<div style="font-size:11.5px;line-height:1.7">${st.anomalies.slice(0,10).map(a =>
+        `<div><span class="pill ${a.severity === 'high' ? 'missed' : 'warn'}">${esc(a.severity)}</span>
+         ${esc(a.reason)}</div>`).join("")}</div>`));
+  }
+
+  m.appendChild(wrap);
+  $("#fstat").textContent =
+    `${num(st.timestamped)} timestamped artifacts over ${st.span_days} days`;
+}
+
+function barPanel(title, values, labels){
+  const p = el("div", "panel");
+  const max = Math.max(...values, 1);
+  p.innerHTML = `<h4>${esc(title)}</h4>
+    <div class="bars">${values.map((v, i) =>
+      `<div class="bar" style="height:${Math.max(2, v/max*100)}%"
+        title="${esc(labels[i] || i)}: ${v}"></div>`).join("")}</div>
+    <div class="barlabels">${labels.map(l =>
+      `<span>${esc(l)}</span>`).join("")}</div>`;
+  return p;
+}
+
+/* ============================ places ============================ */
+async function viewPlaces(m){
+  const r = await API("places");
+  $("#fstat").textContent = `${num(r.count)} geolocated artifacts`;
+  if (!r.count) return m.innerHTML =
+    `<div class="empty"><b>No location data</b>
+     No artifact in this extraction carries usable coordinates.</div>`;
+
+  const b = r.bounds;
+  const padLat = (b.max_lat - b.min_lat) * 0.12 || 0.01;
+  const padLon = (b.max_lon - b.min_lon) * 0.12 || 0.01;
+  const minLat = b.min_lat - padLat, maxLat = b.max_lat + padLat;
+  const minLon = b.min_lon - padLon, maxLon = b.max_lon + padLon;
+
+  const map = el("div", "map");
+  map.innerHTML = `<div style="position:absolute;inset:0;
+    background:repeating-linear-gradient(0deg,#141a22 0 1px,transparent 1px 46px),
+               repeating-linear-gradient(90deg,#141a22 0 1px,transparent 1px 46px)">
+    </div>
+    <div style="position:absolute;top:12px;left:12px;font-size:11px;
+      color:var(--fg3);font-family:var(--mono);background:var(--bg2);
+      border:1px solid var(--line);border-radius:7px;padding:9px 11px">
+      ${r.count} points<br>
+      lat ${b.min_lat.toFixed(4)} … ${b.max_lat.toFixed(4)}<br>
+      lon ${b.min_lon.toFixed(4)} … ${b.max_lon.toFixed(4)}<br>
+      <span style="color:var(--fg3)">click a point for detail</span>
+    </div>`;
+
+  r.points.forEach(p => {
+    const dot = el("div", "mappt");
+    dot.style.left = ((p.longitude - minLon) / (maxLon - minLon) * 100) + "%";
+    dot.style.top  = ((maxLat - p.latitude) / (maxLat - minLat) * 100) + "%";
+    dot.title = `${p.iso}\n${p.category} · ${p.app}\n${p.summary}\n` +
+                `${p.latitude.toFixed(5)}, ${p.longitude.toFixed(5)}`;
+    dot.onclick = () => openDetail(p.artifact_id);
+    map.appendChild(dot);
+  });
+  m.innerHTML = ""; m.appendChild(map);
+  m.style.height = "100%";
+}
+
+/* ============================ applications ============================ */
+async function viewApps(m){
+  const apps = await API("applications");
+  $("#fstat").textContent = `${apps.length} applications with artifacts`;
+  const t = el("table"), thead = el("thead");
+  thead.innerHTML = "<tr><th>Application</th><th>Artifacts</th>" +
+                    "<th>Breakdown</th><th></th></tr>";
+  t.appendChild(thead);
+  const tb = el("tbody");
+  apps.forEach(a => {
+    const tr = el("tr");
+    tr.innerHTML =
+      `<td><b>${esc(a.app)}</b></td>
+       <td class="mono">${num(a.count)}</td>
+       <td>${Object.entries(a.categories).map(([k, v]) =>
+         `<span class="pill">${esc(k)} ${v}</span>`).join(" ")}</td>
+       <td><span class="btn">Open</span></td>`;
+    tr.onclick = () => { $("#q").value = S.query = `app:"${a.app}"`;
+      S.view = "search"; route(); };
+    tb.appendChild(tr);
+  });
+  t.appendChild(tb);
+  m.innerHTML = ""; m.appendChild(t);
+}
+
+/* ============================ extraction log ============================ */
+async function viewLog(m){
+  const log = await API("log");
+  $("#fstat").textContent = `${log.length} extraction log entries`;
+  m.innerHTML = "";
+  const head = el("div", "logline");
+  head.style.background = "var(--bg3)";
+  head.style.position = "sticky"; head.style.top = "0";
+  head.innerHTML = "<b>Timestamp</b><b>Module</b><b>Status</b><b>Message</b>";
+  m.appendChild(head);
+  log.forEach(e => {
+    const d = el("div", "logline " + (e.level || "info"));
+    d.innerHTML =
+      `<span>${esc((e.ts || "").replace("T", " ").slice(0, 23))}</span>
+       <span>${esc(e.module)}</span>
+       <span>${esc(e.status)}</span>
+       <span>${esc(e.message)}</span>`;
+    m.appendChild(d);
+  });
+}
+
+/* ============================ conversations ============================ */
+async function viewConversations(m){
+  const data = await API("conversations?turns=1&min_turns=2&turn_limit=400");
+  const convs = data.conversations || [];
+  if (!convs.length) {
+    m.innerHTML = `<div class="empty"><b>No conversations reconstructed</b>
+      ${esc(data.note || "Not enough threaded material to rebuild an exchange.")}</div>`;
+    $("#qhint").textContent = "0 threads";
+    return;
+  }
+  m.innerHTML = "";
+  const split = el("div", "split");
+  const list = el("div");
+  list.style.borderRight = "1px solid var(--line)";
+  list.style.overflow = "auto";
+  const body = el("div");
+  body.style.overflow = "auto";
+  let active = null;
+
+  function paintThread(c){
+    body.innerHTML = "";
+    const hdr = el("div", "", "");
+    hdr.style.padding = "12px 14px";
+    hdr.style.borderBottom = "1px solid var(--line)";
+    hdr.innerHTML = `<b>${esc(c.label || c.title || c.key || "Thread")}</b>
+      <div style="color:var(--fg3);font-size:11px;margin-top:4px">${
+        (c.turn_count || (c.turns || []).length || 0)} turns · ${
+        esc((c.channels || [c.app]).filter(Boolean).join(", "))}${
+        c.deleted ? ` · <span style="color:var(--deleted)">${c.deleted} deleted</span>` : ""}</div>`;
+    body.appendChild(hdr);
+    const wrap = el("div", "turns");
+    (c.turns || []).forEach(t => {
+      const d = el("div", "turn" + (t.is_owner || t.direction === "outgoing" ? " out" : "")
+        + (t.is_deleted ? " deleted" : ""));
+      const text = t.body || t.text || "";
+      d.appendChild(el("div", "", text));
+      const meta = el("div", "meta",
+        [t.timestamp_iso || "", t.channel || t.app || "",
+         t.is_deleted ? "RECOVERED FROM DELETED SPACE" : ""]
+          .filter(Boolean).join(" · "));
+      d.appendChild(meta);
+      if (t.artifact_id) {
+        d.style.cursor = "pointer";
+        d.onclick = () => openDetail(t.artifact_id);
+      }
+      wrap.appendChild(d);
+    });
+    body.appendChild(wrap);
+  }
+
+  convs.forEach((c, i) => {
+    const b = el("button", "threadbtn" + (i === 0 ? " active" : ""));
+    b.innerHTML = `<div><b>${esc(c.label || c.title || c.key || "Thread")}</b></div>
+      <div style="font-size:11px;color:var(--fg3);margin-top:3px">${
+        (c.turn_count || (c.turns || []).length || 0)} turns${
+        c.deleted ? ` · ${c.deleted} deleted` : ""}</div>`;
+    b.onclick = () => {
+      list.querySelectorAll(".threadbtn").forEach(x => x.classList.remove("active"));
+      b.classList.add("active");
+      active = c;
+      paintThread(c);
+    };
+    list.appendChild(b);
+  });
+  split.appendChild(list);
+  split.appendChild(body);
+  m.appendChild(split);
+  paintThread(convs[0]);
+  $("#qhint").textContent = `${convs.length} thread(s)`;
+}
+
+/* ============================ attribution / fusion ============================ */
+async function viewFusion(m){
+  const data = await API("fusion");
+  const events = data.strongest || [];
+  const by = data.by_attribution || {};
+  m.innerHTML = `
+    <div class="charts">
+      <div class="panel">
+        <h4>Attribution summary</h4>
+        <div class="kv">
+          <dt>Attributed</dt><dd>${num(by.attributed || 0)}</dd>
+          <dt>Probable</dt><dd>${num(by.probable || 0)}</dd>
+          <dt>Unattributed</dt><dd>${num(by.unattributed || 0)}</dd>
+          <dt>Unknown</dt><dd>${num(by.unknown || 0)}</dd>
+          <dt>Coverage</dt><dd>${data.coverage != null ? (data.coverage * 100).toFixed(1) + "%" : "—"}</dd>
+        </div>
+        ${data.note ? `<div style="margin-top:10px;color:var(--fg2);font-size:12px">${
+          esc(data.note)}</div>` : ""}
+      </div>
+      <div class="panel" style="grid-column:1/-1">
+        <h4>Strongest attributions</h4>
+        ${events.length ? events.slice(0, 40).map(e => `
+          <div class="fusionline">
+            <b>${esc((e.timestamp_iso || "").slice(0, 19))}</b>
+            <span class="pill">${esc(e.attribution || "unknown")}</span>
+            strength ${e.strength != null ? e.strength : "—"} —
+            ${esc((e.summary || "").slice(0, 180))}
+          </div>`).join("")
+          : `<div class="empty">No attributed events in this extraction.</div>`}
+      </div>
+    </div>`;
+  $("#qhint").textContent = `${num(data.events || events.length)} fused event(s)`;
+}
+
+async function viewMedia(m){
+  const data = await API("media_matching");
+  const groups = data.groups || data.matches || [];
+  const dupes = data.duplicate_count || data.byte_identical || 0;
+  m.innerHTML = `
+    <div class="charts">
+      <div class="panel">
+        <h4>Perceptual matching</h4>
+        <div class="kv">
+          <dt>Match groups</dt><dd>${num(groups.length)}</dd>
+          <dt>Byte-identical</dt><dd>${num(dupes)}</dd>
+          <dt>Images analysed</dt><dd>${num(data.images_screened || data.screened || 0)}</dd>
+        </div>
+        ${data.note ? `<div style="margin-top:10px;color:var(--fg2);font-size:12px">${
+          esc(data.note)}</div>` : ""}
+      </div>
+      <div class="panel" style="grid-column:1/-1">
+        <h4>Similar / duplicate media</h4>
+        ${groups.length ? groups.slice(0, 30).map(g => `
+          <div class="fusionline">
+            <b>${esc(g.reason || g.kind || "match")}</b>
+            ${g.distance != null ? ` · distance ${g.distance}` : ""}
+            — ${num((g.artifact_ids || g.members || []).length)} file(s)
+            ${(g.artifact_ids || g.members || []).slice(0, 3).map(id =>
+              `<a href="#" class="openart" data-id="${esc(id)}">${esc(String(id).slice(0, 12))}…</a>`
+            ).join(" ")}
+          </div>`).join("")
+          : `<div class="empty">No perceptual matches in this extraction.</div>`}
+      </div>
+    </div>`;
+  m.querySelectorAll(".openart").forEach(a => {
+    a.onclick = e => { e.preventDefault(); openDetail(a.dataset.id); };
+  });
+  $("#qhint").textContent = `${num(groups.length)} media match group(s)`;
+}
+
+/* ============================ detail drawer ============================ */
+function selectRow(row, id){
+  document.querySelectorAll("tbody tr.sel").forEach(r => r.classList.remove("sel"));
+  row.classList.add("sel");
+  openDetail(id);
+}
+
+async function openDetail(id){
+  if (!id) return;
+  const a = await API("artifact?id=" + encodeURIComponent(id));
+  if (!a || a.error) return;
+  S.sel = a;
+  $("#dtitle").textContent = `${a.subtype || a.category}`;
+  const b = $("#dbody");
+  b.innerHTML = "";
+
+  if (a.blob_sha256 && (a.blob?.mime || "").startsWith("image/")){
+    const img = el("img", "preview");
+    img.src = blobUrl(a.blob_sha256);
+    b.appendChild(img);
+  }
+
+  if (a.body){
+    const s = el("div", "dsec");
+    s.innerHTML = `<h5>Content</h5><div class="msgbody">${esc(a.body)}</div>`;
+    b.appendChild(s);
+  }
+
+  const parties = (a.parties || []).map(p =>
+    `<div class="drow"><b>${esc(p.role)}${p.is_owner ? " (owner)" : ""}</b>
+     <span>${esc(p.label)}${p.identifier && p.identifier !== p.label
+        ? " · " + esc(p.identifier) : ""}</span></div>`).join("");
+  if (parties){
+    const s = el("div", "dsec");
+    s.innerHTML = `<h5>Participants</h5>${parties}`;
+    b.appendChild(s);
+  }
+
+  const core = el("div", "dsec");
+  core.innerHTML = `<h5>Artifact</h5>
+    ${kv("Category", a.category)}${kv("Type", a.subtype)}
+    ${kv("Timestamp", a.timestamp_iso)}${kv("Direction", a.direction)}
+    ${kv("Application", a.app)}
+    ${kv("Recovery", a.recovery + (a.is_deleted
+        ? `  (confidence ${a.confidence})` : ""))}
+    ${a.latitude != null ? kv("Coordinates",
+        a.latitude.toFixed(6) + ", " + a.longitude.toFixed(6)) : ""}`;
+  b.appendChild(core);
+
+  const prov = el("div", "dsec");
+  prov.innerHTML = `<h5>Provenance</h5>
+    ${kv("Source file", a.source_path)}
+    ${kv("Table", a.source_table)}${kv("Row id", a.source_row)}
+    ${kv("Container", a.container)}
+    ${a.blob_sha256 ? kv("SHA-256", a.blob_sha256) : ""}
+    ${a.blob ? kv("MD5", a.blob.md5) : ""}
+    ${a.blob ? kv("Size", num(a.blob.size) + " bytes") : ""}
+    ${kv("Artifact ID", a.artifact_id)}`;
+  b.appendChild(prov);
+
+  const attrs = Object.entries(a.attributes || {})
+    .filter(([, v]) => v !== "" && v != null &&
+            !(Array.isArray(v) && !v.length) &&
+            !(typeof v === "object" && !Array.isArray(v) && !Object.keys(v).length));
+  if (attrs.length){
+    const s = el("div", "dsec");
+    s.innerHTML = `<h5>Attributes</h5>` + attrs.map(([k, v]) =>
+      kv(k, Array.isArray(v) ? v.join(", ")
+         : typeof v === "object" ? JSON.stringify(v).slice(0, 400) : v)).join("");
+    b.appendChild(s);
+  }
+
+  const tags = el("div", "dsec");
+  tags.innerHTML = `<h5>Tag</h5>
+    <div class="tagbar">
+      <input id="tagName" placeholder="Tag name (e.g. Key evidence)">
+      <input id="tagNote" placeholder="Note (optional)">
+      <button class="btn primary" id="tagSave">Save tag</button>
+    </div>
+    <div id="tagMsg" style="font-size:11px;color:var(--fg3);margin-top:6px"></div>`;
+  b.appendChild(tags);
+  $("#tagSave").onclick = async () => {
+    const name = $("#tagName").value.trim();
+    if (!name) return;
+    $("#tagMsg").textContent = "Saving…";
+    try {
+      await API_POST("tag", { artifact_id: a.artifact_id, name,
+        note: $("#tagNote").value.trim(), colour: "#e2b33c", actor: "analyst" });
+      $("#tagMsg").textContent = "Tag saved.";
+    } catch (e) {
+      $("#tagMsg").textContent = e.message;
+    }
+  };
+
+  $("#detail").classList.add("open");
+  $("#fsel").textContent = "selected: " + a.artifact_id.slice(0, 12);
+}
+function closeDetail(){ $("#detail").classList.remove("open"); $("#fsel").textContent = ""; }
+
+async function showIntegrity(){
+  const r = await API("integrity");
+  S.view = "integrity";
+  const m = $("#main");
+  m.innerHTML = `<div class="charts"><div class="panel">
+    <h4>Container integrity</h4>
+    ${r.containers.map(c => `
+      <div style="margin-bottom:14px">
+        <div style="font-weight:600;margin-bottom:5px">${esc(c.name)}</div>
+        ${kv("Sealed", c.sealed)}${kv("Blobs checked", c.blobs_checked)}
+        ${kv("Audit entries", c.audit_entries)}
+        ${kv("Audit chain", c.audit_chain_valid ? "valid" : "BROKEN")}
+        ${kv("Result", c.ok ? "VERIFIED" : "FAILED")}
+        ${(c.problems || []).map(p =>
+          `<div class="err" style="margin:6px 0">${esc(p)}</div>`).join("")}
+      </div>`).join("")}
+  </div></div>`;
+}
+</script>
+</body>
+</html>

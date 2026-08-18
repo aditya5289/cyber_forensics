@@ -1,0 +1,15 @@
+{
+  "hooks": {
+    "PostToolUse": [
+      {
+        "matcher": "Write|Edit",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "cd argus-forensics && python -m unittest tests.test_progress tests.test_batch tests.test_mtp -q"
+          }
+        ]
+      }
+    ]
+  }
+}

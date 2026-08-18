@@ -1,0 +1,4074 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>ARGUS Forensics</title>
+<style>
+:root{
+  --bg:#0e1116; --bg2:#151a22; --bg3:#1c232d; --bg4:#232c38;
+  --line:#2a3340; --line2:#374252;
+  --fg:#dfe6ef; --fg2:#93a1b3; --fg3:#61707f;
+  --accent:#4ea8de; --accent2:#2b6cb0;
+  --warn:#e2b33c; --danger:#e5534b; --ok:#3fb950; --deleted:#c678dd;
+  --mono:ui-monospace,SFMono-Regular,"SF Mono",Menlo,Consolas,monospace;
+  --sans:-apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,Helvetica,Arial,sans-serif;
+}
+*{box-sizing:border-box;margin:0;padding:0}
+html,body{height:100%}
+body{background:var(--bg);color:var(--fg);font:13.5px/1.55 var(--sans);
+  overflow:hidden}
+button,input,select,textarea{font:inherit;color:inherit}
+::-webkit-scrollbar{width:10px;height:10px}
+::-webkit-scrollbar-thumb{background:#2f3a47;border-radius:5px}
+::-webkit-scrollbar-thumb:hover{background:#3d4a5a}
+::-webkit-scrollbar-track{background:transparent}
+
+#app{display:grid;grid-template-rows:auto 1fr auto;height:100vh}
+
+/* ───────── header ───────── */
+header{background:var(--bg2);border-bottom:1px solid var(--line);
+  padding:0 16px;display:flex;align-items:center;gap:18px;height:52px}
+.brand{display:flex;align-items:baseline;gap:8px;font-weight:700;
+  letter-spacing:.1em;font-size:14px;color:var(--accent)}
+#buildTag{font:11px var(--mono);opacity:.75}
+.card.blocked{opacity:.72;cursor:default;border-style:dashed}
+.pill.bad{background:#5a2f2c;color:#f0918a;border-color:#5a2f2c}
+.brand em{font-style:normal;color:var(--fg3);font-weight:400;letter-spacing:0;
+  font-size:11px}
+.crumbs{display:flex;gap:14px;font-size:12px;color:var(--fg2);flex-wrap:wrap}
+.crumbs b{color:var(--fg);font-weight:600}
+.hdr-right{margin-left:auto;display:flex;align-items:center;gap:10px}
+.chip{display:inline-flex;align-items:center;gap:6px;font-size:11px;
+  padding:4px 10px;border-radius:99px;border:1px solid var(--line);
+  color:var(--fg2);white-space:nowrap}
+.chip.ok{color:var(--ok);border-color:#1f4d2a;background:#112417}
+.chip.bad{color:var(--danger);border-color:#5a2320;background:#2a1413}
+.chip.warn{color:var(--warn);border-color:#4d411a;background:#221c0e}
+.dot{width:7px;height:7px;border-radius:50%;background:currentColor;flex:none}
+
+/* ───────── layout ───────── */
+.body{display:grid;grid-template-columns:236px 1fr;overflow:hidden}
+nav{background:var(--bg2);border-right:1px solid var(--line);overflow-y:auto;
+  padding:14px 0}
+.navhead{font-size:10px;text-transform:uppercase;letter-spacing:.11em;
+  color:var(--fg3);padding:8px 16px 6px}
+.step{display:flex;align-items:center;gap:11px;padding:9px 16px;cursor:pointer;
+  color:var(--fg2);border-left:2px solid transparent;font-size:13px}
+.step:hover{background:var(--bg3);color:var(--fg)}
+.step.active{background:var(--bg3);color:var(--fg);border-left-color:var(--accent)}
+.step.done .num{background:var(--ok);color:#08130c;border-color:var(--ok)}
+.step.locked{opacity:.4;cursor:not-allowed}
+.step.locked:hover{background:transparent;color:var(--fg2)}
+.num{width:22px;height:22px;border-radius:50%;border:1px solid var(--line2);
+  display:grid;place-items:center;font-size:11px;font-family:var(--mono);
+  flex:none;background:var(--bg)}
+.step.active .num{border-color:var(--accent);color:var(--accent)}
+.step small{display:block;font-size:10.5px;color:var(--fg3);line-height:1.3}
+
+main{overflow:auto;position:relative}
+.pane{padding:26px 30px;max-width:1180px}
+.pane.wide{max-width:none}
+.pane.flush{padding:0;max-width:none;height:100%}
+h1{font-size:21px;font-weight:600;margin-bottom:5px}
+.lede{color:var(--fg2);font-size:13px;margin-bottom:22px;max-width:760px}
+.lede code{font-family:var(--mono);font-size:12px;background:var(--bg3);
+  padding:1px 5px;border-radius:4px}
+h2{font-size:13px;font-weight:600;margin:26px 0 12px;
+  padding-bottom:7px;border-bottom:1px solid var(--line);color:var(--fg)}
+h2:first-of-type{margin-top:0}
+
+/* ───────── forms ───────── */
+.grid{display:grid;gap:14px;grid-template-columns:repeat(auto-fit,minmax(230px,1fr))}
+.grid.two{grid-template-columns:repeat(auto-fit,minmax(300px,1fr))}
+.field{display:flex;flex-direction:column;gap:5px}
+.field label{font-size:11.5px;color:var(--fg2);font-weight:500}
+.field .req{color:var(--warn)}
+.field .help{font-size:11px;color:var(--fg3);line-height:1.45}
+input[type=text],input[type=password],input[type=number],select,textarea{
+  background:var(--bg);border:1px solid var(--line);border-radius:7px;
+  padding:8px 11px;outline:none;width:100%;color:var(--fg)}
+input:focus,select:focus,textarea:focus{border-color:var(--accent)}
+input::placeholder,textarea::placeholder{color:#4a5866}
+textarea{resize:vertical;min-height:70px;font-family:inherit}
+select{cursor:pointer}
+.inline{display:flex;gap:8px;align-items:center}
+.inline input{flex:1}
+
+.btn{background:var(--bg3);border:1px solid var(--line);border-radius:7px;
+  padding:8px 15px;cursor:pointer;color:var(--fg2);white-space:nowrap;
+  display:inline-flex;align-items:center;gap:7px;font-size:13px}
+.btn:hover:not(:disabled){border-color:var(--accent);color:var(--fg)}
+.btn:disabled{opacity:.4;cursor:not-allowed}
+.btn.primary{background:var(--accent2);border-color:var(--accent2);color:#fff}
+.btn.primary:hover:not(:disabled){background:#3a7fc4}
+.btn.danger{color:var(--danger);border-color:#5a2320}
+.btn.sm{padding:5px 10px;font-size:12px}
+.actions{display:flex;gap:10px;margin-top:24px;align-items:center;flex-wrap:wrap}
+.actions .spacer{flex:1}
+
+.check{display:flex;align-items:flex-start;gap:9px;padding:7px 9px;
+  border-radius:7px;cursor:pointer;font-size:12.5px}
+.check:hover{background:var(--bg3)}
+input[type=checkbox],input[type=radio]{width:15px;height:15px;accent-color:var(--accent);
+  cursor:pointer;flex:none;margin-top:2px}
+.check span small{display:block;color:var(--fg3);font-size:11px;line-height:1.4}
+
+/* ───────── cards ───────── */
+.card{background:var(--bg2);border:1px solid var(--line);border-radius:10px;
+  padding:16px}
+.card h3{font-size:12.5px;font-weight:600;margin-bottom:11px;
+  display:flex;align-items:center;gap:8px}
+.card.pick{cursor:pointer}
+.card.pick:hover{border-color:var(--accent)}
+.card.sel{border-color:var(--accent);background:#16202b}
+.cards{display:grid;gap:12px;grid-template-columns:repeat(auto-fill,minmax(272px,1fr))}
+.kv{display:grid;grid-template-columns:auto 1fr;gap:4px 14px;font-size:12px}
+.kv dt{color:var(--fg2);white-space:nowrap}
+.kv dd{font-family:var(--mono);font-size:11.5px;word-break:break-word;
+  text-align:right}
+
+.note{padding:11px 14px;border-radius:8px;font-size:12.5px;line-height:1.55;
+  margin:14px 0;border:1px solid var(--line);background:var(--bg2)}
+.note.warn{border-color:#4d411a;background:#1c1810;color:#e8cf88}
+.note.bad{border-color:#5a2320;background:#231413;color:#f0a29c}
+.note.ok{border-color:#1f4d2a;background:#101d14;color:#8fd7a3}
+.note b{display:block;margin-bottom:3px}
+.note code{font-family:var(--mono);font-size:11.5px}
+
+table{width:100%;border-collapse:collapse;font-size:12.5px}
+th{text-align:left;padding:8px 10px;border-bottom:1px solid var(--line);
+  color:var(--fg2);font-size:11px;font-weight:600;text-transform:uppercase;
+  letter-spacing:.06em;white-space:nowrap}
+td{padding:8px 10px;border-bottom:1px solid #1b222c;vertical-align:top}
+tr.clickable{cursor:pointer}
+tr.clickable:hover td{background:#182029}
+.mono{font-family:var(--mono);font-size:11.5px;color:var(--fg2)}
+.pill{display:inline-block;padding:2px 8px;border-radius:9px;font-size:10.5px;
+  border:1px solid var(--line);color:var(--fg2);white-space:nowrap}
+.pill.ok{color:var(--ok);border-color:#1f4d2a}
+.pill.bad{color:var(--danger);border-color:#5a2320}
+.pill.warn{color:var(--warn);border-color:#4d411a}
+.pill.risk-low{color:var(--ok);border-color:#1f4d2a}
+.pill.risk-medium{color:var(--warn);border-color:#4d411a}
+.pill.risk-high{color:var(--danger);border-color:#5a2320}
+
+/* ───────── log ───────── */
+.logwrap{background:#0a0d12;border:1px solid var(--line);border-radius:9px;
+  max-height:min(62vh,560px);min-height:280px;overflow:auto;padding:2px 0;
+  font-family:var(--mono);font-size:11.5px}
+.logline{display:grid;grid-template-columns:88px 132px 78px 1fr;gap:11px;
+  padding:3px 12px;border-bottom:1px solid #131922;white-space:pre-wrap;
+  word-break:break-word}
+.logline.error{background:#1e1211;color:#f0a29c}
+.logline.warning,.logline.warnline{color:#e8cf88;background:#1a1810}
+.logline .t{color:var(--fg3)}
+.logline .m{color:var(--accent)}
+.logline .s{color:var(--fg2)}
+.progress{height:10px;background:var(--bg3);border-radius:99px;overflow:hidden;
+  margin:0;border:1px solid var(--line);position:relative}
+.progress i{display:block;height:100%;background:linear-gradient(90deg,#2a8cff,#5ec4ff,#8ee4ff);
+  transition:width .4s ease;width:0;border-radius:99px;box-shadow:0 0 12px rgba(42,140,255,.45)}
+.progress.indet i{width:40%;animation:slide 1.2s ease-in-out infinite}
+.job-progress-card{background:linear-gradient(180deg,var(--bg2),#0d1118);
+  border:1px solid var(--line);border-radius:12px;padding:16px 18px;margin:12px 0 14px}
+.job-progress-card h3{margin:0 0 12px;font-size:13px;font-weight:600;
+  display:flex;align-items:center;justify-content:space-between}
+.job-progress-card h3 .phase-pill{font-size:10px;font-weight:600;letter-spacing:.06em;
+  text-transform:uppercase;padding:3px 9px;border-radius:99px;background:#1a2a40;color:#7ec8ff}
+.job-phase-row{display:flex;gap:6px;margin-bottom:14px;flex-wrap:wrap}
+.job-phase{padding:5px 10px;border-radius:99px;font-size:10px;font-weight:600;
+  letter-spacing:.05em;text-transform:uppercase;color:var(--fg3);
+  border:1px solid var(--line);background:var(--bg3)}
+.job-phase.active{color:#7ec8ff;border-color:#2a5080;background:#121c2a}
+.job-phase.done{color:var(--ok);border-color:#1f4a2c;background:#101a12}
+.job-statgrid{display:grid;grid-template-columns:repeat(4,1fr);gap:10px;margin:12px 0}
+.job-stat{background:var(--bg3);border:1px solid var(--line);border-radius:9px;padding:10px 12px}
+.job-stat .lbl{font-size:9.5px;text-transform:uppercase;letter-spacing:.08em;color:var(--fg3)}
+.job-stat .val{font-family:var(--mono);font-size:14px;font-weight:600;margin-top:4px;color:var(--fg)}
+.job-stat .sub{font-size:10px;color:var(--fg2);margin-top:2px}
+.job-progress-meta{display:flex;justify-content:space-between;align-items:baseline;
+  gap:12px;font-size:11.5px;margin-top:10px}
+.job-progress-meta .pct{font-family:var(--mono);font-weight:700;color:var(--fg);font-size:22px}
+.job-progress-meta .eta{font-family:var(--mono);color:var(--accent);text-align:right;font-size:12px}
+.job-progress-detail{font-size:11.5px;color:var(--fg2);margin-top:6px}
+@keyframes slide{0%{margin-left:-40%}100%{margin-left:100%}}
+
+/* ───────── modal ───────── */
+.modal{position:fixed;inset:0;background:rgba(5,8,12,.72);z-index:100;
+  display:none;place-items:center;padding:24px}
+.modal.open{display:grid}
+.modalbox{background:var(--bg2);border:1px solid var(--line2);border-radius:12px;
+  width:min(760px,100%);max-height:82vh;display:flex;flex-direction:column;
+  box-shadow:0 24px 70px rgba(0,0,0,.6)}
+.modalhead{padding:15px 18px;border-bottom:1px solid var(--line);
+  display:flex;align-items:center;gap:12px}
+.modalhead h3{font-size:14px;flex:1}
+.modalbody{flex:1;overflow:auto;padding:0}
+.modalfoot{padding:13px 18px;border-top:1px solid var(--line);
+  display:flex;gap:10px;align-items:center}
+.pathbar{padding:10px 18px;border-bottom:1px solid var(--line);
+  font-family:var(--mono);font-size:11.5px;color:var(--fg2);
+  display:flex;gap:8px;align-items:center;background:var(--bg3)}
+.pathbar input{flex:1;font-family:var(--mono);font-size:11.5px;padding:5px 9px}
+.fsrow{display:flex;align-items:center;gap:10px;padding:7px 18px;cursor:pointer;
+  font-size:12.5px;border-bottom:1px solid #1b222c}
+.fsrow:hover{background:var(--bg3)}
+.fsrow .ic{width:17px;text-align:center;color:var(--fg3);flex:none}
+.fsrow .nm{flex:1;word-break:break-all}
+.fsrow .sz{color:var(--fg3);font-family:var(--mono);font-size:11px}
+.fsrow.dir .ic{color:var(--warn)}
+.fsrow.case .ic,.fsrow.container .ic{color:var(--accent)}
+
+footer{background:var(--bg2);border-top:1px solid var(--line);padding:7px 16px;
+  font-size:11.5px;color:var(--fg3);display:flex;gap:16px;align-items:center;
+  font-family:var(--mono)}
+footer .spacer{flex:1}
+.empty{padding:44px;text-align:center;color:var(--fg3)}
+.empty b{display:block;color:var(--fg2);font-size:14.5px;margin-bottom:7px;
+  font-family:var(--sans)}
+.spin{width:14px;height:14px;border:2px solid var(--line2);
+  border-top-color:var(--accent);border-radius:50%;
+  animation:spin .7s linear infinite;display:inline-block}
+.scan-bar{display:flex;align-items:center;gap:10px;flex-wrap:wrap;
+  padding:8px 12px;margin-bottom:12px;background:var(--bg2);
+  border:1px solid var(--line);border-radius:8px;font-size:11.5px}
+.scan-bar .stages{display:flex;gap:6px;flex-wrap:wrap;flex:1}
+.scan-stage{padding:3px 8px;border-radius:99px;background:var(--bg3);
+  color:var(--fg3);font-family:var(--mono);font-size:10px}
+.scan-stage.done{color:var(--ok);border:1px solid #1a3d2a}
+.scan-stage.running{color:var(--accent);border:1px solid #1a3550}
+.scan-stage.error{color:var(--danger)}
+.transport-pill{font-size:9.5px;font-weight:700;letter-spacing:.06em;
+  padding:2px 7px;border-radius:99px;background:var(--bg3);
+  color:var(--fg2);margin-left:6px;text-transform:uppercase}
+.transport-pill.adb{color:#7ec8ff}
+.transport-pill.mtp{color:#e8cf88}
+.transport-pill.usbmux{color:#c8a0ff}
+.method-pill{font-size:10px;padding:2px 8px;border-radius:99px;
+  background:#1a2a1a;color:var(--ok);margin-left:6px}
+.card .action-line{margin-top:8px;padding:8px 10px;border-radius:7px;
+  background:var(--bg3);font-size:12px;color:var(--fg2)}
+.card .vendor-hints{margin-top:8px;font-size:11px;color:var(--fg3)}
+.card .vendor-hints summary{cursor:pointer;color:var(--fg2)}
+@keyframes spin{to{transform:rotate(360deg)}}
+iframe{width:100%;height:100%;border:0;display:block}
+.taglist{display:flex;flex-wrap:wrap;gap:6px;margin-top:8px}
+.finding{background:var(--bg2);border:1px solid var(--line);border-left:4px solid;
+  border-radius:9px;padding:14px 16px;margin-bottom:12px}
+.finding.critical{border-left-color:var(--danger)}
+.finding.high{border-left-color:#e08b2f}
+.finding.medium{border-left-color:var(--accent)}
+.finding.low,.finding.info{border-left-color:var(--fg3)}
+.fhead{display:flex;align-items:center;gap:10px;flex-wrap:wrap;margin-bottom:7px}
+.fhead h3{font-size:13.5px;flex:1;font-weight:600}
+.sevtag{font-size:9.5px;font-weight:700;letter-spacing:.07em;padding:3px 8px;
+  border-radius:99px;color:#0b0e13}
+.sevtag.critical{background:var(--danger);color:#fff}
+.sevtag.high{background:#e08b2f}
+.sevtag.medium{background:var(--accent)}
+.sevtag.low,.sevtag.info{background:var(--fg3)}
+.finding .why{color:var(--fg);font-size:12.5px;margin:7px 0}
+.finding .detail{color:var(--fg2);font-size:12.5px}
+.finding .caveat{margin-top:9px;padding:8px 11px;border-radius:7px;
+  background:#1c1810;border:1px solid #4d411a;color:#e8cf88;font-size:11.5px}
+.finding .fev{margin:8px 0 0 16px;font-size:11.5px;color:var(--fg2)}
+.finding .fmeta{margin-top:8px;font-size:11px;color:var(--fg3);
+  font-family:var(--mono);display:flex;gap:14px;flex-wrap:wrap}
+.sevbar{display:flex;gap:8px;flex-wrap:wrap;margin-bottom:16px}
+.sevbox{flex:1;min-width:110px;background:var(--bg2);border:1px solid var(--line);
+  border-radius:9px;padding:11px 13px}
+.sevbox .n{font-size:24px;font-weight:600;font-family:var(--mono)}
+.sevbox .l{font-size:10px;text-transform:uppercase;letter-spacing:.08em;
+  color:var(--fg3)}
+
+/* ───────── toast / banner / modal prompt ───────── */
+#toastHost{position:fixed;top:62px;right:16px;z-index:9000;display:flex;
+  flex-direction:column;gap:8px;max-width:420px;pointer-events:none}
+.toast{background:var(--bg2);border:1px solid var(--line);border-radius:10px;
+  padding:11px 14px;font-size:12.5px;box-shadow:0 8px 28px rgba(0,0,0,.45);
+  pointer-events:auto;animation:toastIn .25s ease}
+.toast.ok{border-color:#1f4d2a}
+.toast.warn{border-color:#4d411a}
+.toast.bad{border-color:#5a2320}
+.toast .ttl{font-weight:600;margin-bottom:3px}
+@keyframes toastIn{from{opacity:0;transform:translateY(-8px)}to{opacity:1;transform:none}}
+#sysBanner{background:#221c0e;border-bottom:1px solid #4d411a;color:var(--warn);
+  padding:8px 16px;font-size:12px;display:none}
+#sysBanner.show{display:flex;align-items:center;gap:12px}
+#sysBanner .spacer{flex:1}
+#navToggle{display:none}
+.workflow-chip{font-size:10px;color:var(--fg3);margin-left:8px}
+
+#palette{display:none;position:fixed;inset:0;z-index:1200;background:rgba(0,0,0,.45);
+  place-items:start center;padding-top:12vh}
+#palette.open{display:grid}
+#palette .box{width:min(560px,92vw);background:var(--bg2);border:1px solid var(--line2);
+  border-radius:12px;overflow:hidden}
+#palette input{width:100%;border:0;border-bottom:1px solid var(--line);background:var(--bg3);
+  padding:12px 14px;font-family:var(--mono);font-size:13px}
+#palette .hit{display:flex;justify-content:space-between;gap:12px;padding:9px 14px;
+  cursor:pointer;color:var(--fg2);font-size:13px}
+#palette .hit:hover,#palette .hit.on{background:var(--bg3);color:var(--fg)}
+#palette .hit kbd{font:10px var(--mono);color:var(--fg3)}
+
+
+/* ───────── responsive ───────── */
+@media (max-width: 960px) {
+  #navToggle{display:inline-flex}
+  .body{grid-template-columns:1fr}
+  nav{position:fixed;inset:52px auto 0 0;width:min(280px,88vw);z-index:800;
+    transform:translateX(-105%);transition:transform .25s ease;
+    box-shadow:8px 0 24px rgba(0,0,0,.35)}
+  nav.open{transform:none}
+  .job-statgrid{grid-template-columns:repeat(2,1fr)}
+}
+@media (max-width: 640px) {
+  .pane{padding:18px 16px}
+  header{gap:10px;padding:0 12px}
+  .job-statgrid{grid-template-columns:1fr}
+}
+</style>
+</head>
+<body>
+<div id="app">
+  <div id="sysBanner"><span id="sysBannerMsg"></span><span class="spacer"></span>
+    <button class="btn sm" id="sysBannerDismiss">Dismiss</button></div>
+  <header>
+    <button class="btn sm" id="navToggle" title="Menu">☰</button>
+    <div class="brand">ARGUS <em>God-level</em><em id="buildTag"></em></div>
+    <div class="crumbs" id="crumbs"></div>
+    <div class="hdr-right" id="hdrRight"></div>
+  </header>
+
+  <div class="body">
+    <nav id="nav"></nav>
+    <main id="main"><div class="empty"><span class="spin"></span></div></main>
+  </div>
+
+  <footer>
+    <span id="fstat">Starting…</span>
+    <span class="spacer"></span>
+    <span id="fenv"></span>
+  </footer>
+</div>
+
+<div id="toastHost"></div>
+<div id="palette">
+  <div class="box">
+    <input id="paletteQ" placeholder="Jump to…  extract, findings, scan, verify" spellcheck="false">
+    <div id="paletteHits"></div>
+  </div>
+</div>
+
+<div class="modal" id="promptModal">
+  <div class="modalbox" style="max-width:480px">
+    <div class="modalhead">
+      <h3 id="promptTitle">Confirm</h3>
+      <button class="btn sm" id="promptCancel">Cancel</button>
+    </div>
+    <div class="modalbody" style="padding:16px">
+      <p id="promptText" style="margin-bottom:12px;color:var(--fg2)"></p>
+      <input id="promptInput" type="text" style="display:none">
+      <textarea id="promptArea" style="display:none;min-height:90px"></textarea>
+    </div>
+    <div class="modalfoot">
+      <span class="spacer"></span>
+      <button class="btn primary" id="promptOk">OK</button>
+    </div>
+  </div>
+</div>
+
+<div class="modal" id="modal">
+  <div class="modalbox">
+    <div class="modalhead">
+      <h3 id="modalTitle">Choose a folder</h3>
+      <button class="btn sm" onclick="closeModal()">Close</button>
+    </div>
+    <div class="pathbar">
+      <button class="btn sm" id="fsUp">↑ Up</button>
+      <input id="fsPath" spellcheck="false" placeholder="Type or paste a path…">
+      <button class="btn sm" id="fsGo">Go</button>
+    </div>
+    <div class="modalbody" id="fsBody"></div>
+    <div class="modalfoot">
+      <span class="mono" id="fsSel" style="flex:1;color:var(--fg3)"></span>
+      <button class="btn primary" id="fsPick">Use this folder</button>
+    </div>
+  </div>
+</div>
+
+<script>
+"use strict";
+
+/* ═══════════════════════ plumbing ═══════════════════════ */
+const TOKEN = (() => {
+  const fromHash = (location.hash.match(/token=([^&]+)/) || [])[1] || "";
+  if (fromHash) {
+    try { sessionStorage.setItem("argus_token", fromHash); } catch (_) {}
+    if (location.hash) history.replaceState(null, "", location.pathname);
+    return fromHash;
+  }
+  try { return sessionStorage.getItem("argus_token") || ""; } catch (_) { return ""; }
+})();
+
+const $  = s => document.querySelector(s);
+const $$ = s => [...document.querySelectorAll(s)];
+
+function toast(message, opts = {}) {
+  const host = $("#toastHost");
+  if (!host) return;
+  const type = opts.type || "info";
+  const box = el("div", `toast ${type}`);
+  box.innerHTML = opts.title
+    ? `<div class="ttl">${esc(opts.title)}</div>${esc(message)}`
+    : esc(message);
+  host.appendChild(box);
+  setTimeout(() => box.remove(), opts.duration || 4500);
+}
+
+function showPrompt({ title, text, placeholder = "", multiline = false, password = false }) {
+  return new Promise(resolve => {
+    const modal = $("#promptModal");
+    $("#promptTitle").textContent = title || "Confirm";
+    $("#promptText").textContent = text || "";
+    const input = multiline ? $("#promptArea") : $("#promptInput");
+    const other = multiline ? $("#promptInput") : $("#promptArea");
+    input.style.display = "";
+    other.style.display = "none";
+    input.value = "";
+    input.placeholder = placeholder;
+    input.type = password ? "password" : (multiline ? "text" : "text");
+    const done = (val) => { modal.classList.remove("open"); resolve(val); };
+    $("#promptOk").onclick = () => done(input.value);
+    $("#promptCancel").onclick = () => done(null);
+    modal.classList.add("open");
+    input.focus();
+    input.onkeydown = e => { if (e.key === "Enter" && !multiline) done(input.value); };
+  });
+}
+
+function saveLastCase(path, protectedCase) {
+  try {
+    localStorage.setItem("argus_last_case", JSON.stringify({
+      path, protected: !!protectedCase, at: Date.now(),
+    }));
+  } catch (_) {}
+}
+
+function relativeTime(iso) {
+  if (!iso) return "";
+  const sec = Math.round((Date.now() - Date.parse(iso)) / 1000);
+  if (sec < 60) return `${sec}s ago`;
+  if (sec < 3600) return `${Math.floor(sec / 60)}m ago`;
+  return `${Math.floor(sec / 3600)}h ago`;
+}
+
+const LOCK_HINTS = {
+  exhibit: "Open or create a case first",
+  device: "Register and select an exhibit first (Step 3)",
+  extract: "Register an exhibit before extraction",
+  analyse: "Complete an extraction to unlock analysis",
+  findings: "Run intelligence screening first",
+  report: "Generate a report first",
+};
+
+function hasExhibits() {
+  return (S.caseOverview?.exhibits || []).length > 0;
+}
+
+function workflowNext() {
+  if (!S.casePath) return "case";
+  if (!hasExhibits() || !S.exhibitId) return "exhibit";
+  if (!stepDone("device")) return "device";
+  if (!stepDone("extract")) return "extract";
+  if (!stepDone("analyse")) return "analyse";
+  return "overview";
+}
+
+function ensureWorkflowView() {
+  if (unlocked(S.view)) return false;
+  const next = workflowNext();
+  if (next === S.view) return false;
+  toast(LOCK_HINTS[S.view] || "Complete earlier workflow steps first",
+    { type: "warn", title: "Step " + (STEPS.findIndex(s => s[0] === S.view) + 1) });
+  S.view = next;
+  renderNav();
+  return true;
+}
+
+function onGlobalKey(e) {
+  if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === "k") {
+    e.preventDefault();
+    openPalette();
+    return;
+  }
+  if (e.key === "Escape" && $("#palette")?.classList.contains("open")) {
+    closePalette();
+    return;
+  }
+  if (e.target.matches("input, textarea, select") && !e.altKey) return;
+  if (e.key === "?" && !e.ctrlKey && !e.metaKey) {
+    e.preventDefault();
+    toast("Ctrl+K command palette · Alt+1–8 workflow steps · Esc close", {
+      title: "Keyboard shortcuts", duration: 6000,
+    });
+    return;
+  }
+  if (e.altKey && e.key >= "1" && e.key <= "8") {
+    const idx = Number(e.key) - 1;
+    const step = STEPS[idx];
+    if (step && unlocked(step[0])) {
+      e.preventDefault();
+      S.view = step[0];
+      renderNav();
+      route();
+      $("#nav")?.classList.remove("open");
+    }
+  }
+}
+
+const PALETTE_ITEMS = [
+  ["case", "Open / create case", "1"],
+  ["overview", "Case overview", "2"],
+  ["exhibit", "Register exhibit", "3"],
+  ["device", "Scan & device support", "4"],
+  ["extract", "Extract (god-speed)", "5"],
+  ["analyse", "Analyse", "6"],
+  ["findings", "Findings / lead sheet", "7"],
+  ["report", "Report & certificate", "8"],
+];
+
+function closePalette() {
+  $("#palette")?.classList.remove("open");
+}
+
+function openPalette() {
+  const pal = $("#palette");
+  const box = $("#paletteHits");
+  const q = $("#paletteQ");
+  if (!pal || !box || !q) return;
+  pal.classList.add("open");
+  q.value = "";
+  const paint = () => {
+    const needle = q.value.trim().toLowerCase();
+    const hits = PALETTE_ITEMS.filter(it =>
+      !needle || it[0].includes(needle) || it[1].toLowerCase().includes(needle));
+    box.innerHTML = hits.map((it, i) =>
+      `<div class="hit${i===0?" on":""}" data-view="${esc(it[0])}">
+        <span>${esc(it[1])}</span><kbd>${esc(it[2] ? "Alt+" + it[2] : "")}</kbd></div>`
+    ).join("") || `<div class="hit">No match</div>`;
+    box.querySelectorAll(".hit[data-view]").forEach(h => {
+      h.onclick = () => {
+        const id = h.dataset.view;
+        closePalette();
+        if (unlocked(id)) { S.view = id; renderNav(); route(); }
+        else toast("Complete earlier steps first", { type: "warn" });
+      };
+    });
+  };
+  q.oninput = paint;
+  q.onkeydown = ev => {
+    if (ev.key === "Escape") { closePalette(); }
+    if (ev.key === "Enter") {
+      const first = box.querySelector(".hit[data-view]");
+      first?.click();
+    }
+  };
+  paint();
+  q.focus();
+}
+
+const el = (t, c, x) => { const n = document.createElement(t);
+  if (c) n.className = c; if (x !== undefined) n.textContent = x; return n; };
+const esc = s => String(s ?? "").replace(/[&<>"']/g,
+  c => ({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;","'":"&#39;"}[c]));
+const num = n => (n ?? 0).toLocaleString();
+const human = n => { n = n || 0;
+  for (const u of ["B","KB","MB","GB","TB"]) {
+    if (n < 1024) return u === "B" ? `${n|0} B` : `${n.toFixed(1)} ${u}`;
+    n /= 1024; } return `${n.toFixed(1)} PB`; };
+
+async function api(path, opts, retries = 3) {
+  const url = "/api/" + path + (path.includes("?") ? "&" : "?") +
+              "token=" + encodeURIComponent(TOKEN);
+  let lastErr = null;
+  for (let i = 0; i < retries; i++) {
+    try {
+      const res = await fetch(url, opts);
+      const data = await res.json().catch(() => ({ error: `HTTP ${res.status}` }));
+      if (!res.ok) throw new Error(data.error || `HTTP ${res.status}`);
+      return data;
+    } catch (e) {
+      lastErr = e;
+      if (i < retries - 1) await new Promise(r => setTimeout(r, 350 * (i + 1)));
+    }
+  }
+  throw lastErr;
+}
+const post = (path, body) => api(path, {
+  method: "POST", headers: { "Content-Type": "application/json" },
+  body: JSON.stringify({ ...body, token: TOKEN }) });
+
+/* ═══════════════════════ state ═══════════════════════ */
+const S = {
+  env: null,
+  view: "case",
+  casePath: null, caseOverview: null, casePassword: "",
+  exhibitId: null,
+  device: null,            // detected device, if any
+  deviceProfile: null,     // capability overview from the manual
+  source: null,            // { path, classification }
+  containers: [],          // selected for analysis/report
+  job: null, jobSeq: 0, jobTimer: null,
+  jobPollBackoff: 250,
+  lastAcquirePayload: null,
+  lastBatchPayload: null,
+  preferredMethod: "",
+  lastScanAt: 0,
+  autoScanOn: false,
+  lastReport: null, intel: null, owner: "",
+  resumeContainer: null,
+  batchSelected: [],
+};
+
+const STEPS = [
+  ["case",     "Case",       "Create or open"],
+  ["overview", "Overview",   "Case dashboard"],
+  ["exhibit",  "Exhibit",    "Register the device"],
+  ["device",   "Support",    "Verify capability"],
+  ["extract",  "Extract",    "Acquire the data"],
+  ["analyse",  "Analyse",    "Review artifacts"],
+  ["findings", "Findings",   "Ranked leads"],
+  ["report",   "Report",     "Export findings"],
+];
+
+function unlocked(view) {
+  if (view === "case") return true;
+  if (view === "overview") return !!S.casePath;
+  if (view === "exhibit") return !!S.casePath;
+  if (view === "device") return !!S.casePath && hasExhibits() && !!S.exhibitId;
+  if (view === "extract") return !!S.casePath && hasExhibits() && !!S.exhibitId;
+  if (view === "analyse" || view === "report" || view === "findings")
+    return (S.caseOverview?.extractions || []).length > 0;
+  return false;
+}
+function stepDone(view) {
+  if (view === "case") return !!S.casePath;
+  if (view === "overview") return !!S.casePath;
+  if (view === "exhibit") return (S.caseOverview?.exhibits || []).length > 0;
+  if (view === "device") return !!S.deviceProfile || !!S.source;
+  if (view === "extract") return (S.caseOverview?.extractions || []).length > 0;
+  if (view === "analyse") return S.containers.length > 0;
+  if (view === "findings") return !!S.intel;
+  if (view === "report") return !!S.lastReport;
+  return false;
+}
+
+/* ═══════════════════════ boot ═══════════════════════ */
+(async function boot() {
+  if (!TOKEN) {
+    $("#main").innerHTML = `<div class="pane"><div class="note bad">
+      <b>Session token missing</b>
+      This page must be opened by the ARGUS launcher so it can present its
+      session token. Close this tab and run the launcher again.</div></div>`;
+    return;
+  }
+  try {
+    S.env = await api("env");
+    $("#fenv").textContent =
+      `ARGUS ${S.env.version} god-level · build ${S.env.build || "unidentified"} · ` +
+      `Python ${S.env.python} · Ctrl+K`;
+    // Shown in the header too. With several extracted copies on different
+    // drives there is otherwise no way to tell from the screen which one is
+    // running, and a fixed bug gets re-reported from a stale folder.
+    const tag = $("#buildTag");
+    if (tag) {
+      tag.textContent = S.env.build ? `build ${S.env.build}` : "";
+      tag.title = "Installation build ID — quote this when reporting a problem, "
+                + "and check it matches the release you meant to run.";
+    }
+    const sc = S.env.selfcheck || {};
+    const banner = $("#sysBanner");
+    if (banner && sc.ok === false) {
+      $("#sysBannerMsg").textContent =
+        `Installation modified — ${sc.mismatch_count || 0} file(s) differ from the release manifest.`;
+      banner.classList.add("show");
+      $("#sysBannerDismiss").onclick = () => banner.classList.remove("show");
+    }
+    try {
+      S.autoScanOn = sessionStorage.getItem("argus_autoscan") === "1";
+    } catch (_) {}
+    $("#navToggle")?.addEventListener("click", () =>
+      $("#nav").classList.toggle("open"));
+    document.addEventListener("keydown", onGlobalKey);
+    renderNav(); renderHeader();
+    await resumeRunningJob();
+    await route();
+  } catch (e) {
+    $("#main").innerHTML = `<div class="pane"><div class="note bad">
+      <b>Could not reach the ARGUS service</b>${esc(e.message)}</div></div>`;
+  }
+})();
+
+async function resumeRunningJob() {
+  try {
+    const data = await api("jobs?limit=10");
+    const running = (data.jobs || []).find(j => j.status === "running");
+    if (!running) return;
+    S.view = running.kind === "acquire" || running.kind === "batch"
+      ? "extract" : S.view;
+    toast(`Resuming job: ${running.label || running.kind}`, { type: "warn" });
+    renderNav();
+    const mount = running.kind === "batch" ? "runBlock" : "runBlock";
+    setTimeout(() => {
+      if ($("#" + mount)) watchJob(running.id, mount, async () => {
+        await refreshCase();
+        S.containers = (S.caseOverview?.extractions || []).map(x => x.path);
+      });
+    }, 300);
+  } catch (_) {}
+}
+
+function renderNav() {
+  const nav = $("#nav");
+  nav.innerHTML = "";
+  nav.appendChild(el("div", "navhead", "Workflow"));
+  STEPS.forEach(([id, label, sub], i) => {
+    const ok = unlocked(id);
+    const d = el("div", "step" + (S.view === id ? " active" : "") +
+                         (stepDone(id) ? " done" : "") + (ok ? "" : " locked"));
+    d.innerHTML = `<span class="num">${stepDone(id) ? "✓" : i + 1}</span>
+      <span><span>${esc(label)}</span><small>${esc(sub)}</small></span>`;
+    if (ok) d.onclick = () => { S.view = id; renderNav(); route(); };
+    else d.title = LOCK_HINTS[id] || "Complete earlier steps first";
+    nav.appendChild(d);
+  });
+  const doneCount = STEPS.filter(([id]) => stepDone(id)).length;
+
+  nav.appendChild(el("div", "navhead", "Environment"));
+  const wf = el("div", "step");
+  wf.style.cursor = "default";
+  wf.innerHTML = `<span class="num" style="border-color:var(--accent);color:var(--accent)">${
+    doneCount}</span><span><span>Workflow</span><small>${
+    doneCount}/${STEPS.length} steps complete</small></span>`;
+  nav.appendChild(wf);
+
+  const t = S.env?.toolchain || {};
+  const tool = (name, info, why) => {
+    const d = el("div", "step");
+    d.style.cursor = "default";
+    d.innerHTML = `<span class="num" style="border-color:${
+        info?.available ? "var(--ok)" : "var(--line2)"};color:${
+        info?.available ? "var(--ok)" : "var(--fg3)"}">${
+        info?.available ? "✓" : "–"}</span>
+      <span><span>${esc(name)}</span><small>${
+        info?.available ? "available" : esc(why)}</small></span>`;
+    nav.appendChild(d);
+  };
+  tool("adb", t.adb, "Android live extraction off");
+  tool("libimobiledevice", t.libimobiledevice, "iOS live extraction off");
+  const missing = Object.entries(S.env?.capabilities || {})
+    .filter(([, v]) => !v.available);
+  if (missing.length) {
+    const d = el("div", "step");
+    d.style.cursor = "default";
+    d.innerHTML = `<span class="num" style="color:var(--warn);
+      border-color:#4d411a">!</span><span><span>Optional features</span>
+      <small>${missing.length} unavailable — see Report step</small></span>`;
+    nav.appendChild(d);
+  }
+}
+
+function renderHeader() {
+  const c = $("#crumbs");
+  const bits = [];
+  if (S.caseOverview) bits.push(`Case <b>${esc(S.caseOverview.case_id)}</b>`);
+  if (S.exhibitId) bits.push(`Exhibit <b>${esc(S.exhibitId)}</b>`);
+  if (S.caseOverview?.total_artifacts)
+    bits.push(`Artifacts <b>${num(S.caseOverview.total_artifacts)}</b>`);
+  c.innerHTML = bits.join("") ||
+    `<span style="color:var(--fg3)">No case open</span>`;
+
+  const r = $("#hdrRight");
+  r.innerHTML = "";
+  const god = el("div", "chip ok");
+  god.title = "Ctrl+K command palette";
+  god.style.cursor = "pointer";
+  god.innerHTML = `<span class="dot"></span>God-level v${esc(S.env?.version || "1.1")}`;
+  god.onclick = () => openPalette();
+  r.appendChild(god);
+  const sc = S.env?.selfcheck;
+  if (sc) {
+    const chip = el("div", "chip " + (sc.ok ? "ok" : "warn"));
+    chip.title = sc.ok ? "Installation verified against release manifest"
+      : `${sc.mismatch_count || 0} modified file(s)`;
+    chip.innerHTML = `<span class="dot"></span>${
+      sc.ok ? "Install verified" : "Modified build"}`;
+    r.appendChild(chip);
+  }
+  if (S.caseOverview) {
+    const valid = S.caseOverview.audit_chain_valid;
+    const chip = el("div", "chip " + (valid ? "ok" : "bad"));
+    chip.innerHTML = `<span class="dot"></span>${
+      valid ? "Custody chain intact" : "CUSTODY CHAIN BROKEN"}`;
+    r.appendChild(chip);
+  }
+  if (S.job && S.job.status === "running") {
+    const chip = el("div", "chip warn");
+    chip.style.cursor = "pointer";
+    chip.title = "Click to watch live progress";
+    const pct = S.jobProgress ? ` ${Math.round(S.jobProgress)}%` : "";
+    const eta = S.job.eta_seconds ? ` · ~${formatDuration(S.job.eta_seconds)} left` : "";
+    chip.innerHTML = `<span class="spin"></span>${esc(S.job.label || "working")}${pct}${eta}`;
+    chip.onclick = () => { S.view = "extract"; renderNav(); route(); };
+    r.appendChild(chip);
+  }
+  if (S.deviceHealth) {
+    const h = S.deviceHealth;
+    const chip = el("div", "chip " + (h.ok ? "ok" : "warn"));
+    chip.title = h.detail || "";
+    chip.innerHTML = `<span class="dot"></span>${esc(h.label || "Device")}`;
+    r.appendChild(chip);
+  }
+}
+
+async function route() {
+  renderHeader();
+  if (ensureWorkflowView()) return route();
+  const m = $("#main");
+  if (S.view !== "analyse") m.innerHTML = `<div class="empty"><span class="spin"></span></div>`;
+  try {
+    const views = { case: viewCase, overview: viewOverview, exhibit: viewExhibit,
+      device: viewDevice, extract: viewExtract, analyse: viewAnalyse,
+      findings: viewFindings, report: viewReport };
+    await views[S.view](m);
+  } catch (e) {
+    m.innerHTML = `<div class="pane"><div class="note bad"><b>Error</b>${
+      esc(e.message)}</div></div>`;
+  }
+}
+function setStat(t) { $("#fstat").textContent = t; }
+
+/* ═══════════════════════ 1 · CASE ═══════════════════════ */
+async function viewCase(m) {
+  const dir = S.env.workspace + (S.env.workspace.includes("\\") ? "\\cases" : "/cases");
+  let listing = { cases: [] };
+  try { listing = await api("cases?dir=" + encodeURIComponent(dir)); } catch (_) {}
+
+  m.innerHTML = `<div class="pane">
+    <h1>Case</h1>
+    <div class="lede">A case holds the exhibits you seize and every extraction
+      taken from them. The Case ID, investigator and location are part of the
+      chain of custody, so they are recorded before any evidence is touched.
+      <span class="mono" style="display:block;margin-top:6px;color:var(--fg3)">
+      Lab manual §5.2, Steps 3–5</span></div>
+
+    <h2>Create a new case</h2>
+    <div class="grid">
+      <div class="field"><label>Case ID</label>
+        <input id="cId" value="${esc(S.env.suggested_case_id)}" spellcheck="false">
+        <span class="help">A timestamp-based ID is suggested; edit it to match
+          your reference if you prefer.</span></div>
+      <div class="field"><label>Investigating officer</label>
+        <input id="cInv" placeholder="e.g. A. Sharma"></div>
+      <div class="field"><label>Organisation</label>
+        <input id="cOrg" placeholder="e.g. State Cyber Cell"></div>
+      <div class="field"><label>Case password <span class="help"
+        style="display:inline">(optional)</span></label>
+        <input id="cPw" type="password" placeholder="Leave blank for none">
+        <span class="help">Gates access through this tool. It is not
+          encryption at rest — do not treat it as such.</span></div>
+    </div>
+    <div class="field" style="margin-top:14px"><label>Save location</label>
+      <div class="inline"><input id="cDir" value="${esc(dir)}" spellcheck="false">
+        <button class="btn" id="cBrowse">Browse…</button></div></div>
+    <div class="field" style="margin-top:14px"><label>Description</label>
+      <textarea id="cDesc" placeholder="Brief description of the matter"></textarea></div>
+    <div class="actions">
+      <button class="btn primary" id="cCreate">Create case</button>
+      <span id="cMsg" class="mono"></span></div>
+
+    <h2>Open an existing case</h2>
+    <div id="caseList"></div>
+  </div>`;
+
+  $("#cBrowse").onclick = () => openBrowser({
+    title: "Choose where to save cases", start: $("#cDir").value,
+    onPick: p => $("#cDir").value = p });
+
+  $("#cCreate").onclick = async () => {
+    const btn = $("#cCreate"); btn.disabled = true;
+    $("#cMsg").textContent = "";
+    try {
+      const r = await post("case/new", {
+        dir: $("#cDir").value.trim(), case_id: $("#cId").value.trim(),
+        investigator: $("#cInv").value.trim(),
+        organisation: $("#cOrg").value.trim(),
+        description: $("#cDesc").value.trim(),
+        password: $("#cPw").value });
+      S.casePath = r.path; S.caseOverview = r.overview;
+      S.casePassword = $("#cPw").value; S.exhibitId = null;
+      saveLastCase(r.path, !!$("#cPw").value);
+      S.view = hasExhibits() ? "overview" : "exhibit";
+      renderNav(); route();
+    } catch (e) {
+      $("#cMsg").innerHTML = `<span style="color:var(--danger)">${esc(e.message)}</span>`;
+      btn.disabled = false;
+    }
+  };
+
+  const holder = $("#caseList");
+  let lastBanner = "";
+  try {
+    const last = JSON.parse(localStorage.getItem("argus_last_case") || "null");
+    if (last?.path && last.path !== S.casePath) {
+      lastBanner = `<div class="note" style="margin-bottom:14px">
+        <b>Continue where you left off</b> — last case opened ${relativeTime(new Date(last.at).toISOString())}.
+        <div class="actions" style="margin-top:8px">
+          <button class="btn primary sm" id="resumeLastCase">Open last case</button>
+        </div></div>`;
+    }
+  } catch (_) {}
+  holder.innerHTML = lastBanner;
+  if (!listing.cases.length) {
+    holder.innerHTML += `<div class="note">No cases found in
+      <code>${esc(dir)}</code> yet. Create one above, or browse to another
+      location.</div>`;
+  } else {
+    const cards = el("div", "cards");
+    listing.cases.forEach(c => {
+      const card = el("div", "card pick" + (S.casePath === c.path ? " sel" : ""));
+      card.innerHTML = `<h3>${esc(c.case_id)}
+        ${c.protected ? '<span class="pill warn">locked</span>' : ""}
+        <span class="pill">${esc(c.status)}</span></h3>
+        <dl class="kv">
+          <dt>Created</dt><dd>${esc((c.created_at || "").slice(0, 19))}</dd>
+          <dt>Investigator</dt><dd>${esc(c.investigator || "—")}</dd>
+          <dt>Exhibits</dt><dd>${c.exhibits}</dd>
+        </dl>`;
+      card.onclick = () => openCase(c.path, c.protected);
+      cards.appendChild(card);
+    });
+    holder.appendChild(cards);
+  }
+  $("#resumeLastCase")?.addEventListener("click", async () => {
+    try {
+      const last = JSON.parse(localStorage.getItem("argus_last_case") || "null");
+      if (last?.path) await openCase(last.path, last.protected);
+    } catch (_) {}
+  });
+  setStat(`${listing.cases.length} case(s) in ${dir}`);
+}
+
+async function openCase(path, needsPassword) {
+  let pw = "";
+  if (needsPassword) {
+    pw = await showPrompt({
+      title: "Case password",
+      text: "This case is protected. Enter the password to open it.",
+      placeholder: "Password", password: true,
+    });
+    if (pw === null) return;
+  }
+  try {
+    const ov = await api("case?path=" + encodeURIComponent(path) +
+                         "&password=" + encodeURIComponent(pw));
+    S.casePath = path; S.caseOverview = ov; S.casePassword = pw;
+    S.exhibitId = ov.exhibits[0]?.exhibit_id || null;
+    S.containers = (ov.extractions || []).map(x => x.path);
+    saveLastCase(path, needsPassword);
+    S.view = hasExhibits() ? "overview" : "exhibit";
+    renderNav(); route();
+    toast(`Opened case ${ov.case_id}`, { type: "ok" });
+  } catch (e) { toast("Could not open the case: " + e.message, { type: "bad" }); }
+}
+
+async function refreshCase() {
+  if (!S.casePath) return;
+  S.caseOverview = await api("case?path=" + encodeURIComponent(S.casePath) +
+                             "&password=" + encodeURIComponent(S.casePassword));
+  renderNav(); renderHeader();
+}
+
+function openAnalysis(extra) {
+  if (!S.containers.length) {
+    toast("Select at least one extraction.", { type: "warn" });
+    return;
+  }
+  const q = new URLSearchParams({ token: TOKEN,
+                                  containers: S.containers.join("\n") });
+  if (extra?.artifact) q.set("artifact", extra.artifact);
+  if (extra?.query) q.set("q", extra.query);
+  const picked = (S.caseOverview?.extractions || [])
+    .filter(x => S.containers.includes(x.path));
+  const names = picked.map(x => x.exhibit_id || x.name).join(", ")
+    || `${S.containers.length} container(s)`;
+  const dev = picked[0] || {};
+  const device = [dev.device_make, dev.device_model].filter(Boolean).join(" ");
+  const arts = picked.reduce((a, x) => a + (x.artifact_count || 0), 0);
+  $("#main").innerHTML = `<div class="pane flush" style="display:flex;flex-direction:column;height:100%">
+    <div style="display:flex;gap:10px;padding:8px 14px;background:var(--bg2);
+                border-bottom:1px solid var(--line);align-items:center;flex-wrap:wrap">
+      <button class="btn sm" id="leaveAnalysis">← Back to workflow</button>
+      <span style="color:var(--fg2)"><b>Analysis</b> — ${esc(names)}</span>
+      ${device ? `<span class="chip" style="font-size:11px">${esc(device)}</span>` : ""}
+      ${arts ? `<span class="chip ok" style="font-size:11px">${arts.toLocaleString()} artifacts</span>` : ""}
+      <span class="spacer" style="flex:1"></span>
+      <span class="chip ok" style="font-size:11px">Horizon command center · FTS · tagged</span>
+    </div>
+    <iframe src="/analyst.html?${q}" style="flex:1;border:0;width:100%;min-height:0"></iframe>
+  </div>`;
+  $("#leaveAnalysis").onclick = () => route();
+  setStat(`Analysing ${names}`);
+}
+
+/* ═══════════════════════ 1b · OVERVIEW ═══════════════════════ */
+async function viewOverview(m) {
+  if (!S.casePath) { S.view = "case"; return route(); }
+  await refreshCase();
+  const ov = S.caseOverview;
+  const ex = ov.extractions || [];
+  const exhibits = ov.exhibits || [];
+  const statusCls = ov.status === "closed" ? "warn" : "ok";
+  const incomplete = ex.filter(x => x.incomplete).length;
+  const sealed = ex.filter(x => x.sealed).length;
+  let activity = [];
+  let jobs = [];
+  try {
+    const act = await api(`case/activity?path=${encodeURIComponent(S.casePath)}`
+      + `&password=${encodeURIComponent(S.casePassword)}&limit=12`);
+    activity = act.activity || [];
+  } catch (_) {}
+  try {
+    const j = await api("jobs?limit=8");
+    jobs = j.jobs || [];
+  } catch (_) {}
+  const runningJob = jobs.find(j => j.status === "running");
+
+  m.innerHTML = `<div class="pane">
+    ${runningJob ? `<div class="note warn" style="margin-bottom:14px">
+      <b>Extraction in progress</b> — ${esc(runningJob.label || runningJob.kind)}
+      (${Math.round((runningJob.progress || 0) * 100)}%)
+      <div class="actions" style="margin-top:8px">
+        <button class="btn sm primary" id="ovWatchJob">Watch live progress</button>
+      </div></div>` : ""}
+    <h1>Case overview</h1>
+    <div class="lede">The MSAB Case Overview equivalent — every exhibit,
+      extraction, and artifact total in one place before you start work.
+      <span class="mono" style="display:block;margin-top:6px;color:var(--fg3)">
+      Lab manual §5.3</span></div>
+
+    ${!exhibits.length ? `<div class="note warn" style="margin-bottom:14px">
+      <b>Step 3 — Exhibit required</b> — Register the seized device (EXH-001, make,
+      model, isolation method) before scanning USB or extracting. Chain-of-custody
+      fields are written at registration time.</div>` : ""}
+
+    <div class="grid" style="margin-bottom:18px">
+      <div class="card"><h3>Case</h3><dl class="kv">
+        <dt>ID</dt><dd><b>${esc(ov.case_id)}</b></dd>
+        <dt>Status</dt><dd><span class="pill ${statusCls}">${esc(ov.status)}</span></dd>
+        <dt>Investigator</dt><dd>${esc(ov.investigator || "—")}</dd>
+        <dt>Organisation</dt><dd>${esc(ov.organisation || "—")}</dd>
+        <dt>Created</dt><dd>${esc((ov.created_at || "").slice(0, 19))}</dd>
+      </dl></div>
+      <div class="card"><h3>Totals</h3><dl class="kv">
+        <dt>Exhibits</dt><dd>${exhibits.length}</dd>
+        <dt>Extractions</dt><dd>${ex.length}</dd>
+        <dt>Artifacts</dt><dd><b>${num(ov.total_artifacts)}</b></dd>
+        <dt>Custody entries</dt><dd>${num(ov.audit_entries)}</dd>
+        <dt>Chain</dt><dd>${ov.audit_chain_valid
+          ? '<span class="pill ok">intact</span>'
+          : '<span class="pill bad">BROKEN</span>'}</dd>
+      </dl></div>
+    </div>
+
+    <h2>Case health</h2>
+    <div class="grid" style="margin-bottom:18px">
+      <div class="card"><h3>Integrity</h3><dl class="kv">
+        <dt>Audit chain</dt><dd>${ov.audit_chain_valid
+          ? '<span class="pill ok">intact</span>'
+          : '<span class="pill bad">BROKEN</span>'}</dd>
+        <dt>Incomplete</dt><dd>${incomplete ? `<span class="pill bad">${incomplete}</span>` : "0"}</dd>
+        <dt>Sealed</dt><dd>${sealed} / ${ex.length}</dd>
+        <dt>Custody entries</dt><dd>${num(ov.audit_entries)}</dd>
+      </dl></div>
+      <div class="card"><h3>Quick actions</h3>
+        <div class="actions" style="margin-top:0">
+          ${incomplete ? `<button class="btn sm" id="ovResume">Resume incomplete</button>` : ""}
+          <button class="btn sm" id="ovVerify">Verify containers</button>
+        </div>
+        <div id="ovHealthMsg" style="margin-top:10px"></div>
+      </div>
+    </div>
+    <div id="ovTriage"></div>
+    ${!ov.audit_chain_valid && (ov.audit_problems || []).length
+      ? `<div class="note bad"><b>Chain-of-custody problems</b><ul style="margin:8px 0 0 18px">${
+        ov.audit_problems.slice(0, 6).map(p => `<li>${esc(p)}</li>`).join("")
+      }</ul></div>` : ""}
+
+    <h2>Recent activity</h2>
+    ${activity.length ? `<table><thead><tr><th>When</th><th>Actor</th><th>Action</th></tr></thead><tbody>
+      ${activity.map(a => `<tr>
+        <td class="mono">${esc((a.ts || "").slice(0, 19))}</td>
+        <td>${esc(a.actor || "—")}</td>
+        <td>${esc(a.action)}</td></tr>`).join("")}
+      </tbody></table>` : `<div class="note">No custody events recorded yet.</div>`}
+    ${jobs.length ? `<h2 style="margin-top:22px">Background jobs</h2>
+      <table><thead><tr><th>Job</th><th>Status</th><th>Progress</th><th></th></tr></thead><tbody>
+      ${jobs.map(j => `<tr>
+        <td>${esc(j.label || j.kind)}</td>
+        <td><span class="pill ${j.status === "done" ? "ok" : j.status === "failed" ? "bad" : "warn"}">${esc(j.status)}</span></td>
+        <td>${j.progress ? Math.round(j.progress * 100) + "%" : "—"}</td>
+        <td>${j.status === "running"
+          ? `<button class="btn sm job-watch" data-id="${esc(j.id)}">Watch</button>` : ""}</td>
+      </tr>`).join("")}
+      </tbody></table>` : ""}
+
+    ${ov.description ? `<div class="note">${esc(ov.description)}</div>` : ""}
+
+    <h2>Exhibits</h2>
+    ${exhibits.length ? `<table><thead><tr><th>Exhibit</th><th>Device</th>
+      <th>IMEI</th><th>Isolation</th><th>Seized by</th></tr></thead><tbody>
+      ${exhibits.map(e => `<tr>
+        <td><b>${esc(e.exhibit_id)}</b></td>
+        <td>${esc([e.make, e.model].filter(Boolean).join(" ") || "—")}</td>
+        <td class="mono">${esc(e.imei || "—")}</td>
+        <td>${esc(e.isolation || "—")}</td>
+        <td>${esc(e.seized_by || "—")}</td></tr>`).join("")}
+      </tbody></table>` : `<div class="note">No exhibits registered yet.</div>`}
+
+    <h2>Extractions</h2>
+    ${ex.length ? `<table><thead><tr><th>Exhibit</th><th>Device</th><th>Method</th>
+      <th>Operator</th><th>Artifacts</th><th>Custody</th><th>Status</th><th>Size</th><th></th></tr></thead><tbody>
+      ${ex.map(x => `<tr>
+        <td><b>${esc(x.exhibit_id)}</b></td>
+        <td>${esc(x.device || "—")}</td>
+        <td>${esc(x.method)}</td>
+        <td>${esc(x.operator || "—")}</td>
+        <td>${num(x.artifacts)}</td>
+        <td>${x.field_custody_entries
+          ? `<span class="pill ok">${x.field_custody_entries}</span>`
+          : "—"}</td>
+        <td><span class="pill ${x.incomplete ? "bad" : x.sealed ? "ok" : "warn"}">${esc(x.status)}</span></td>
+        <td>${human(x.size_bytes)}</td>
+        <td class="actions" style="white-space:nowrap">
+          ${x.zip_path ? `<button class="btn sm open-zip-btn" data-path="${esc(x.zip_path)}">ZIP</button>` : ""}
+          <button class="btn sm open-container-btn" data-path="${esc(x.path)}">Open</button>
+          ${!x.zip_path ? `<button class="btn sm save-container-btn" data-path="${esc(x.path)}">Save ZIP</button>` : ""}
+          ${x.incomplete ? `<button class="btn sm resume-btn" data-path="${
+            esc(x.path)}">Resume</button>` : ""}</td></tr>`).join("")}
+      </tbody></table>` : `<div class="note">No extractions yet. Go to Extract
+        to acquire or import evidence.</div>`}
+
+    <div class="actions">
+      <button class="btn primary" id="ovNext">${
+        !exhibits.length ? "Register exhibit →"
+        : !S.exhibitId ? "Select exhibit →"
+        : "Verify device support →"}</button>
+      <button class="btn" id="ovExtract" ${exhibits.length ? "" : "disabled"}>Extract / import</button>
+      <button class="btn" id="ovAnalyse" ${ex.length ? "" : "disabled"}>Analyse</button>
+      <button class="btn" id="ovFindings" ${ex.length ? "" : "disabled"}>Findings</button>
+      <button class="btn" id="ovReport" ${ex.length ? "" : "disabled"}>Report</button>
+      ${ov.status !== "closed"
+        ? `<button class="btn danger" id="ovClose">Close case</button>` : ""}
+      <span class="spacer"></span>
+      <span class="mono">${esc(ov.location || "")}</span>
+    </div>
+    <div id="ovMsg"></div>
+  </div>`;
+
+  m.querySelectorAll(".open-zip-btn").forEach(btn => {
+    btn.onclick = () => openContainerFolder(btn.dataset.path);
+  });
+  m.querySelectorAll(".open-container-btn").forEach(btn => {
+    btn.onclick = () => openContainerFolder(btn.dataset.path);
+  });
+  m.querySelectorAll(".save-container-btn").forEach(btn => {
+    btn.onclick = () => saveContainerZip(btn.dataset.path);
+  });
+  $("#ovNext").onclick = () => {
+    if (!exhibits.length || !S.exhibitId) {
+      S.view = "exhibit"; renderNav(); route();
+      return;
+    }
+    S.view = "device"; renderNav(); route();
+  };
+  $("#ovExtract").onclick = () => {
+    if (!hasExhibits() || !S.exhibitId) {
+      toast("Register and select an exhibit first (Step 3).", { type: "warn" });
+      S.view = "exhibit"; renderNav(); route();
+      return;
+    }
+    S.view = "extract"; renderNav(); route();
+  };
+  (async () => {
+    const paths = ex.map(x => x.path).filter(Boolean);
+    const host = $("#ovTriage");
+    if (!host || !paths.length) return;
+    try {
+      const t = await api("triage?containers=" + encodeURIComponent(paths.join("\n")));
+      const alerts = t.alerts || [];
+      const apps = t.top_apps || [];
+      host.innerHTML = `<h2>God-level triage</h2>
+        <div class="grid" style="margin-bottom:18px">
+          <div class="card"><h3>Snapshot</h3><dl class="kv">
+            <dt>Artifacts</dt><dd><b>${num(t.total_artifacts)}</b></dd>
+            <dt>Deleted recovered</dt><dd>${num(t.deleted_recovered)}</dd>
+            <dt>Encrypted stores</dt><dd>${num((t.encrypted_stores||[]).length)}</dd>
+            <dt>Activity</dt><dd>${esc((t.first_activity||"").slice(0,10) || "—")}
+              → ${esc((t.last_activity||"").slice(0,10) || "—")}</dd>
+          </dl></div>
+          <div class="card"><h3>Alerts</h3>
+            ${alerts.length ? alerts.map(a =>
+              `<div class="note ${a.level==="critical"||a.level==="high"?"bad":"warn"}" style="margin-bottom:8px">
+                <b>${esc(a.title)}</b><div>${esc(a.detail||"")}</div></div>`
+            ).join("") : `<div class="note ok">No integrity or encryption alerts.</div>`}
+            ${apps.length ? `<div class="mono" style="margin-top:8px;font-size:11px">${
+              apps.slice(0,6).map(a => esc(a.app)+" · "+num(a.count)).join("<br>")
+            }</div>` : ""}
+          </div>
+        </div>`;
+    } catch (_) {}
+  })();
+  $("#ovWatchJob")?.addEventListener("click", () => {
+    S.view = "extract"; renderNav(); route();
+    setTimeout(() => {
+      if (runningJob) watchJob(runningJob.id, "runBlock", async () => {
+        await refreshCase();
+        S.containers = (S.caseOverview.extractions || []).map(x => x.path);
+      });
+    }, 250);
+  });
+  $("#ovAnalyse").onclick = () => { S.view = "analyse"; renderNav(); route(); };
+  $("#ovFindings").onclick = () => { S.intel = null; S.view = "findings";
+    renderNav(); route(); };
+  $("#ovReport").onclick = () => { S.view = "report"; renderNav(); route(); };
+  if ($("#ovClose")) $("#ovClose").onclick = async () => {
+    const conclusion = await showPrompt({
+      title: "Close case",
+      text: "Enter an optional closing conclusion for the case record.",
+      placeholder: "Conclusion…", multiline: true,
+    });
+    if (conclusion === null) return;
+    try {
+      await post("case/close", { case_path: S.casePath,
+        password: S.casePassword, conclusion: conclusion || "" });
+      await refreshCase();
+      toast("Case closed", { type: "ok" });
+      route();
+    } catch (e) {
+      $("#ovMsg").innerHTML = `<div class="note bad">${esc(e.message)}</div>`;
+    }
+  };
+  $("#ovResume")?.addEventListener("click", () => {
+    const hit = ex.find(x => x.incomplete);
+    if (hit) { S.resumeContainer = hit.path; S.view = "extract"; renderNav(); route(); }
+  });
+  $("#ovVerify")?.addEventListener("click", async () => {
+    const paths = ex.map(x => x.path).join("\n");
+    if (!paths) return;
+    try {
+      const r = await api(`verify?containers=${encodeURIComponent(paths)}`);
+      $("#ovHealthMsg").innerHTML = r.ok
+        ? `<span class="pill ok">All containers verified</span>`
+        : `<span class="pill bad">${r.results.filter(x => !x.ok).length} problem(s)</span>`;
+    } catch (e) {
+      $("#ovHealthMsg").innerHTML = `<span class="pill bad">${esc(e.message)}</span>`;
+    }
+  });
+  m.querySelectorAll(".job-watch").forEach(btn => {
+    btn.onclick = () => {
+      S.view = "extract"; renderNav(); route();
+      setTimeout(() => watchJob(btn.dataset.id, "runBlock", async () => {
+        await refreshCase();
+        S.containers = (S.caseOverview.extractions || []).map(x => x.path);
+      }), 200);
+    };
+  });
+  m.querySelectorAll(".resume-btn").forEach(btn => {
+    btn.onclick = () => {
+      S.resumeContainer = btn.dataset.path;
+      S.view = "extract";
+      renderNav();
+      route();
+    };
+  });
+  setStat(`${exhibits.length} exhibit(s) · ${ex.length} extraction(s)`);
+}
+
+/* ═══════════════════════ 2 · EXHIBIT ═══════════════════════ */
+async function viewExhibit(m) {
+  if (!S.casePath) { S.view = "case"; return route(); }
+  await refreshCase();
+  const list = S.caseOverview.exhibits || [];
+  m.innerHTML = `<div class="pane">
+    <h1>Exhibit</h1>
+    <div class="lede">Register the seized device. These details are written
+      into the hash-chained custody log and appear on every report. Recording
+      the isolation method matters: a handset that was never isolated could
+      have received a remote wipe between seizure and acquisition.</div>
+
+    ${list.length ? `<h2>Registered exhibits</h2><table>
+      <thead><tr><th>Exhibit</th><th>Make</th><th>Model</th><th>IMEI</th>
+        <th>Isolation</th><th>Seized by</th><th></th><th></th></tr></thead>
+      <tbody>${list.map(e => `<tr class="clickable" data-id="${esc(e.exhibit_id)}">
+        <td><b>${esc(e.exhibit_id)}</b></td><td>${esc(e.make || "—")}</td>
+        <td>${esc(e.model || "—")}</td><td class="mono">${esc(e.imei || "—")}</td>
+        <td>${e.isolation ? esc(e.isolation)
+             : '<span class="pill warn">not recorded</span>'}</td>
+        <td>${esc(e.seized_by || "—")}</td>
+        <td>${S.exhibitId === e.exhibit_id
+             ? '<span class="pill ok">selected</span>'
+             : `<button type="button" class="btn sm x-pick" data-id="${esc(e.exhibit_id)}">Select</button>`}
+        </td>
+        <td><button type="button" class="btn sm x-go" data-id="${esc(e.exhibit_id)}">Extract →</button></td></tr>`).join("")}
+      </tbody></table>` : ""}
+
+    <h2>Register a new exhibit</h2>
+    <div class="grid">
+      <div class="field"><label>Exhibit ID <span class="req">*</span></label>
+        <input id="xId" value="EXH-${String(list.length + 1).padStart(3, "0")}"
+          spellcheck="false"></div>
+      <div class="field"><label>Make</label>
+        <input id="xMake" placeholder="Samsung / Apple"></div>
+      <div class="field"><label>Model</label>
+        <input id="xModel" placeholder="Galaxy S21 5G"></div>
+      <div class="field"><label>IMEI</label>
+        <input id="xImei" spellcheck="false"></div>
+      <div class="field"><label>Serial</label><input id="xSerial" spellcheck="false"></div>
+      <div class="field"><label>Phone number</label><input id="xNumber"></div>
+      <div class="field"><label>Seized from</label><input id="xFrom"></div>
+      <div class="field"><label>Seized by</label>
+        <input id="xBy" placeholder="Insp. R. Kulkarni"></div>
+      <div class="field"><label>Seized at</label>
+        <input id="xAt" placeholder="2026-07-20 09:15"></div>
+      <div class="field"><label>Isolation method</label>
+        <select id="xIso">
+          <option value="Faraday pouch">Faraday pouch</option>
+          <option value="Airplane mode">Airplane mode</option>
+          <option value="Powered off">Powered off</option>
+          <option value="SIM removed">SIM removed</option>
+          <option value="">Not isolated</option>
+        </select>
+        <span class="help">Manual §7, precaution 2.</span></div>
+      <div class="field"><label>Condition</label>
+        <input id="xCond" placeholder="e.g. screen cracked, powers on"></div>
+    </div>
+    <div class="actions">
+      <button class="btn primary" id="xAdd">Register exhibit</button>
+      ${list.length ? `<button class="btn" id="xNext">Continue →</button>` : ""}
+      <span id="xMsg" class="mono"></span></div>
+  </div>`;
+
+  m.querySelectorAll("tr.clickable").forEach(tr => {
+    tr.onclick = () => { S.exhibitId = tr.dataset.id; renderNav(); route(); };
+  });
+  m.querySelectorAll(".x-pick").forEach(btn => {
+    btn.onclick = (e) => {
+      e.stopPropagation();
+      S.exhibitId = btn.dataset.id;
+      toast(`Selected ${S.exhibitId}`, { type: "ok" });
+      renderNav();
+      route();
+    };
+  });
+  m.querySelectorAll(".x-go").forEach(btn => {
+    btn.onclick = (e) => {
+      e.stopPropagation();
+      S.exhibitId = btn.dataset.id;
+      S.view = "device";
+      renderNav();
+      route();
+    };
+  });
+  if ($("#xNext")) $("#xNext").onclick = () => {
+    if (!S.exhibitId) {
+      toast("Select an exhibit from the table or register a new one.", { type: "warn" });
+      return;
+    }
+    S.view = "device"; renderNav(); route();
+  };
+
+  $("#xAdd").onclick = async () => {
+    const btn = $("#xAdd"); btn.disabled = true; $("#xMsg").textContent = "";
+    try {
+      const r = await post("exhibit/add", {
+        case_path: S.casePath, password: S.casePassword,
+        exhibit_id: $("#xId").value.trim(), make: $("#xMake").value.trim(),
+        model: $("#xModel").value.trim(), imei: $("#xImei").value.trim(),
+        serial: $("#xSerial").value.trim(),
+        phone_number: $("#xNumber").value.trim(),
+        seized_from: $("#xFrom").value.trim(), seized_by: $("#xBy").value.trim(),
+        seized_at: $("#xAt").value.trim(), isolation: $("#xIso").value,
+        condition: $("#xCond").value.trim() });
+      S.exhibitId = r.exhibit.exhibit_id; S.caseOverview = r.overview;
+      if (r.warnings.length) r.warnings.forEach(w => toast(w, { type: "warn", title: "Exhibit" }));
+      toast(`Exhibit ${S.exhibitId} registered — now verify device support.`,
+        { type: "ok" });
+      S.view = "device"; renderNav(); route();
+    } catch (e) {
+      $("#xMsg").innerHTML = `<span style="color:var(--danger)">${esc(e.message)}</span>`;
+      btn.disabled = false;
+    }
+  };
+  setStat(`${list.length} exhibit(s) registered`);
+}
+
+/* ═══════════════════════ 3 · DEVICE SUPPORT ═══════════════════════ */
+function syncBatchButtons() {
+  const n = S.batchSelected.length;
+  const btn = $("#devBatch");
+  if (btn) {
+    btn.disabled = !n || !S.casePath;
+    btn.textContent = n ? `Batch extract selected (${n})` : "Batch extract selected";
+  }
+  const allBtn = $("#devBatchAll");
+  if (allBtn) allBtn.disabled = !S.casePath;
+}
+
+async function viewDevice(m) {
+  if (!S.casePath) { S.view = "case"; return route(); }
+  if (!hasExhibits() || !S.exhibitId) {
+    S.view = "exhibit";
+    toast("Register and select an exhibit before device support (Step 3).",
+      { type: "warn" });
+    return route();
+  }
+  const exhibit = (S.caseOverview.exhibits || [])
+    .find(e => e.exhibit_id === S.exhibitId) || {};
+  const guess = [exhibit.make, exhibit.model].filter(Boolean).join(" ");
+
+  m.innerHTML = `<div class="pane">
+    <h1>Device support</h1>
+    <div class="lede">Before connecting anything, confirm what is actually
+      possible for this handset in its current lock state. Attempting an
+      unsupported method risks data loss or device damage, so ARGUS refuses to
+      start one.
+      <span class="mono" style="display:block;margin-top:6px;color:var(--fg3)">
+      Lab manual §5.1, Steps 1–2</span></div>
+
+    <h2>Connected devices</h2>
+    <div class="actions" style="margin-bottom:10px">
+      <button class="btn sm" id="devWatch">Watch USB (2 min)</button>
+      <button class="btn sm" id="devWatchStop" disabled>Stop watching</button>
+      <button class="btn primary sm" id="devScan">Scan devices</button>
+      <button class="btn sm" id="devScanDeep">Deep scan</button>
+      <button class="btn sm" id="devScanRefresh">Restart adb & scan</button>
+      <button class="btn sm" id="devAutoScan">Auto-scan: off</button>
+      <button class="btn primary sm" id="devBatch" disabled>Batch extract selected</button>
+      <button class="btn sm" id="devBatchAll">Extract all connected</button>
+      <span class="mono" id="devWatchStat" style="font-size:11px;color:var(--fg3)"></span>
+    </div>
+    <div id="devScanBar" class="scan-bar" style="display:none"></div>
+    <div id="devWatchLog" style="max-height:120px;overflow:auto;font-size:11px;
+      margin-bottom:12px;display:none"></div>
+    <div id="devPanel"><span class="spin"></span></div>
+
+    <h2>Device manual</h2>
+    <div class="inline" style="max-width:520px">
+      <input id="dQ" placeholder="Search a model, e.g. iPhone 12 mini"
+        value="${esc(guess)}" spellcheck="false">
+      <button class="btn" id="dSearch">Search</button></div>
+    <div id="dResults" style="margin-top:14px"></div>
+    <div id="dMatrix"></div>
+    <div class="actions">
+      <button class="btn primary" id="dNext">Continue to extraction →</button>
+    </div>
+  </div>`;
+
+  $("#dNext").onclick = () => { stopDeviceWatch(); stopAutoScan(); S.view = "extract"; renderNav(); route(); };
+  $("#dSearch").onclick = () => searchManual($("#dQ").value);
+  $("#dQ").onkeydown = e => { if (e.key === "Enter") searchManual($("#dQ").value); };
+
+  let watchTimer = null;
+  let autoScanTimer = null;
+  const stopAutoScan = () => {
+    clearInterval(autoScanTimer);
+    autoScanTimer = null;
+    S.autoScanOn = false;
+    try { sessionStorage.setItem("argus_autoscan", "0"); } catch (_) {}
+    const btn = $("#devAutoScan");
+    if (btn) btn.textContent = "Auto-scan: off";
+  };
+  const startAutoScan = () => {
+    stopAutoScan();
+    S.autoScanOn = true;
+    try { sessionStorage.setItem("argus_autoscan", "1"); } catch (_) {}
+    const btn = $("#devAutoScan");
+    if (btn) btn.textContent = "Auto-scan: on (12s)";
+    autoScanTimer = setInterval(() => refreshDevices({ deep: false, quiet: true }), 12000);
+  };
+  const stopDeviceWatch = () => {
+    clearInterval(watchTimer);
+    watchTimer = null;
+    const stop = $("#devWatchStop");
+    const watch = $("#devWatch");
+    if (stop) stop.disabled = true;
+    if (watch) watch.disabled = false;
+  };
+  const renderWatchEvents = (events) => {
+    const log = $("#devWatchLog");
+    if (!log || !events.length) return;
+    log.style.display = "";
+    events.forEach(ev => {
+      const d = el("div", "logline " + (ev.kind === "disconnected" ? "warning" : "info"));
+      d.textContent = `${(ev.ts || "").slice(11, 19)}  ${ev.message}`;
+      log.appendChild(d);
+    });
+    log.scrollTop = log.scrollHeight;
+  };
+  $("#devWatch").onclick = async () => {
+    $("#devWatchLog").innerHTML = "";
+    $("#devWatchLog").style.display = "";
+    $("#devWatch").disabled = true;
+    $("#devWatchStop").disabled = false;
+    await api("watch?reset=1");
+    const started = Date.now();
+    const pollWatch = async () => {
+      try {
+        const w = await api("watch");
+        renderWatchEvents(w.events || []);
+        $("#devWatchStat").textContent =
+          `${w.count} device(s) · ${(w.history || []).length} event(s)`;
+        if (w.devices.length) {
+          S.device = w.devices[0];
+          await refreshDevices();
+        }
+      } catch (_) {}
+    };
+    pollWatch();
+    watchTimer = setInterval(pollWatch, 1500);
+    setTimeout(() => { stopDeviceWatch(); }, 120000);
+  };
+  $("#devWatchStop").onclick = stopDeviceWatch;
+
+  const startBatchExtraction = async ({ allConnected }) => {
+    if (!S.casePath) {
+      toast("Open a case before starting a batch extraction.", { type: "warn" });
+      return;
+    }
+    const op = (S.caseOverview?.investigator || "").trim()
+      || await showPrompt({
+        title: "Batch operator",
+        text: "Enter the operator name for this batch extraction.",
+        placeholder: "Operator name",
+      });
+    if (!op) return;
+    const btnAll = $("#devBatchAll");
+    const btnSel = $("#devBatch");
+    if (btnAll) btnAll.disabled = true;
+    if (btnSel) btnSel.disabled = true;
+    try {
+      const devices = allConnected ? [] : S.batchSelected.map(serial => {
+        const d = (S.connectedDevices || []).find(x => x.serial === serial) || {};
+        const method = d.raw?.recommended_method
+          || (d.transport === "mtp" ? "mtp" : "comprehensive");
+        return {
+          serial,
+          device_name: d.name || d.model || serial,
+          transport: d.transport || "",
+          mtp_name: d.raw?.mtp_name || d.name || d.model || "",
+          make: d.make || "",
+          model: d.marketing_name || d.model || "",
+          imei: d.imei || "",
+          method,
+        };
+      });
+      const hasMtp = devices.some(d => d.method === "mtp");
+      const hasIncomplete = (S.caseOverview?.extractions || [])
+        .some(x => x.incomplete);
+      try { sessionStorage.setItem("argus_operator", op); } catch (_) {}
+      const batchBody = {
+        case_path: S.casePath, password: S.casePassword,
+        operator: op, method: hasMtp ? "mtp" : "comprehensive",
+        turbo: true,
+        all_connected: allConnected, devices: devices.map(d => ({
+          ...d, resume: hasIncomplete,
+        })),
+        auto_register_exhibits: true, time_span: "all",
+        recover_deleted: true };
+      S.lastBatchPayload = batchBody;
+      const r = await post("acquire/batch", batchBody);
+      S.view = "extract";
+      renderNav();
+      route();
+      watchJob(r.job_id, "runBlock", async () => {
+        await refreshCase();
+        S.containers = (S.caseOverview.extractions || []).map(x => x.path);
+        S.batchSelected = [];
+        syncBatchButtons();
+      });
+    } catch (e) {
+      toast(e.message || String(e), { type: "bad" });
+      syncBatchButtons();
+    }
+  };
+
+  $("#devBatch").onclick = () => startBatchExtraction({ allConnected: false });
+  $("#devBatchAll").onclick = () => startBatchExtraction({ allConnected: true });
+  $("#devScan").onclick = () => refreshDevices({ deep: false });
+  $("#devScanDeep").onclick = () => refreshDevices({ deep: true });
+  $("#devScanRefresh").onclick = () => refreshDevices({ deep: true, refreshAdb: true });
+  $("#devAutoScan").onclick = () => { S.autoScanOn ? stopAutoScan() : startAutoScan(); };
+  if (S.autoScanOn) startAutoScan();
+  syncBatchButtons();
+
+  refreshDevices({ deep: false });
+  if (guess) searchManual(guess);
+  setStat("Verify device support before connecting the handset");
+}
+
+function renderScanBar(scan) {
+  const bar = $("#devScanBar");
+  if (!bar || !scan) { if (bar) bar.style.display = "none"; return; }
+  const stages = (scan.stages || []).map(s =>
+    `<span class="scan-stage ${esc(s.status)}">${esc(s.label)}`
+    + (s.count ? ` (${s.count})` : "")
+    + (s.elapsed_ms ? ` ${s.elapsed_ms}ms` : "") + `</span>`
+  ).join("");
+  const transports = Object.entries(scan.by_transport || {})
+    .map(([k, v]) => `${k}:${v}`).join(" · ");
+  bar.style.display = "";
+  bar.innerHTML = `<span class="spin"></span>`
+    + `<span><b>${scan.elapsed_ms}ms</b> · ${scan.physical_devices || 0} device(s)`
+    + (scan.merged_from > scan.physical_devices
+      ? ` (merged ${scan.merged_from})` : "")
+    + (transports ? ` · ${esc(transports)}` : "") + `</span>`
+    + `<span class="stages">${stages}</span>`;
+}
+
+function deviceTransportBadges(d) {
+  const transports = d.raw?.transports || [d.transport];
+  return transports.map(t =>
+    `<span class="transport-pill ${esc(t)}">${esc(t)}</span>`).join("");
+}
+
+function deviceCardHtml(d, i) {
+  const ready = d.raw?.ready !== false;
+  const method = d.raw?.recommended_method;
+  return `<div class="card ${ready ? "pick" : "blocked"}" data-i="${i}">
+    ${ready ? `<label class="batch-pick" style="float:right;font-size:11px"
+      onclick="event.stopPropagation()"><input type="checkbox" class="batch-cb"
+      data-serial="${esc(d.serial)}" ${
+      S.batchSelected.includes(d.serial) ? "checked" : ""}> batch</label>` : ""}
+    <h3>${esc(d.name || d.model || d.serial)}
+      ${deviceTransportBadges(d)}
+      ${method ? `<span class="method-pill">${esc(method)}</span>` : ""}
+      ${!ready
+        ? `<span class="pill bad">${esc(d.raw?.adb_state || "not ready")}</span>`
+        : d.trusted ? '<span class="pill ok">trusted</span>'
+                    : '<span class="pill warn">not paired</span>'}</h3>
+    <dl class="kv">
+      <dt>Serial</dt><dd class="mono" style="font-size:10px;word-break:break-all">${
+        esc(d.serial)}</dd>
+      <dt>OS</dt><dd>${esc(d.os_family)} ${esc(d.os_version || "")}</dd>
+      <dt>Chipset</dt><dd>${esc(d.chipset || "—")}</dd>
+      <dt>IMEI</dt><dd>${esc(d.imei || "—")}</dd>
+      <dt>USB</dt><dd>${esc(
+        [d.raw?.usb_vendor, d.raw?.usb_vid && ("VID_" + String(d.raw.usb_vid).toUpperCase()),
+         d.raw?.usb_pid && ("PID_" + String(d.raw.usb_pid).toUpperCase()),
+         d.raw?.usb_mode].filter(Boolean).join(" · ") || "—")}</dd>
+      ${(d.raw?.volumes || []).length
+        ? `<dt>Volumes</dt><dd>${esc((d.raw.volumes || []).join(", "))}</dd>` : ""}
+      ${d.raw?.identity?.security_patch
+        ? `<dt>Patch</dt><dd>${esc(d.raw.identity.security_patch)}</dd>` : ""}
+      <dt>Root</dt><dd>${d.rooted ? "yes" : "no"}</dd>
+      <dt>Battery</dt><dd>${d.battery == null ? "—" : d.battery + "%"}</dd>
+    </dl>
+    ${d.raw?.recommended_action
+      ? `<div class="action-line">${esc(d.raw.recommended_action)}</div>` : ""}
+    ${d.raw?.meaning ? `<div style="margin:8px 0 0"><b>${
+      esc(d.raw.meaning)}</b></div>` : ""}
+    ${d.raw?.hint ? `<div class="note warn" style="margin:6px 0 0">${
+      esc(d.raw.hint)}</div>` : ""}
+    ${(d.raw?.vendor_hints || []).length
+      ? `<details class="vendor-hints"><summary>Vendor-specific tips</summary><ul>${
+        d.raw.vendor_hints.map(h => `<li>${esc(h)}</li>`).join("")
+      }</ul></details>` : ""}
+    ${ready && method ? `<div class="actions" style="margin-top:10px">
+      <button type="button" class="btn sm primary extract-rec">Extract (${esc(method)}) →</button>
+    </div>` : ""}
+  </div>`;
+}
+
+function wireDevicePanel(r, p) {
+  p.querySelectorAll(".card.pick").forEach(card => {
+    card.onclick = () => {
+      const d = r.devices[+card.dataset.i];
+      if (d.raw && d.raw.ready === false) return;
+      S.device = d;
+      S.preferredMethod = d.raw?.recommended_method || (d.transport === "mtp" ? "mtp" : "");
+      p.querySelectorAll(".card").forEach(c => c.classList.remove("sel"));
+      card.classList.add("sel");
+      $("#dQ").value = d.name || d.model;
+      searchManual($("#dQ").value);
+    };
+  });
+  p.querySelectorAll(".card.pick").forEach(card => {
+    const recBtn = card.querySelector(".extract-rec");
+    if (recBtn) {
+      recBtn.onclick = (e) => {
+        e.stopPropagation();
+        const d = r.devices[+card.dataset.i];
+        S.device = d;
+        S.preferredMethod = d.raw?.recommended_method
+          || (d.transport === "mtp" ? "mtp" : "comprehensive");
+        S.view = "extract";
+        renderNav();
+        route();
+      };
+    }
+  });
+  p.querySelectorAll(".batch-cb").forEach(cb => {
+    cb.onchange = () => {
+      const serial = cb.dataset.serial;
+      if (cb.checked) {
+        if (!S.batchSelected.includes(serial)) S.batchSelected.push(serial);
+      } else {
+        S.batchSelected = S.batchSelected.filter(s => s !== serial);
+      }
+      syncBatchButtons();
+    };
+  });
+  syncBatchButtons();
+  if ($("#devAgain")) $("#devAgain").onclick = () => refreshDevices({ deep: true });
+  if ($("#devWhy")) $("#devWhy").onclick = runDeviceDiagnose;
+}
+
+async function runDeviceDiagnose() {
+  const host = $("#devDiag");
+  if (!host) return;
+  host.innerHTML = `<div class="note">Running diagnostics…</div>`;
+  try {
+    const d = await api("diagnose");
+    let html = `<div class="note"><b>Diagnosis</b>`;
+    if (d.devices && d.devices.length) {
+      html += `<table class="tbl"><tr><th>Serial</th><th>State</th>`
+            + `<th>Model</th><th>What it means</th></tr>`;
+      d.devices.forEach(x => {
+        html += `<tr><td>${esc(x.serial)}</td><td><b>${esc(x.state)}</b>`
+              + `</td><td>${esc(x.model || "—")}</td>`
+              + `<td>${esc(x.meaning)}</td></tr>`;
+      });
+      html += `</table>`;
+    }
+    (d.problems || []).forEach(pr => {
+      html += `<div style="margin-top:8px"><b>${esc(pr.issue)}</b><br>`
+            + `<span style="color:var(--fg2)">→ ${esc(pr.fix)}</span></div>`;
+    });
+    if ((d.vendor_guidance || []).length) {
+      html += `<div style="margin-top:10px"><b>Vendor-specific</b><ul>`;
+      d.vendor_guidance.forEach(g => { html += `<li>${esc(g)}</li>`; });
+      html += `</ul></div>`;
+    }
+    (d.next_steps || []).forEach(s => {
+      html += `<div style="margin-top:6px">→ ${esc(s)}</div>`;
+    });
+    html += `</div>`;
+    host.innerHTML = html;
+  } catch (e) {
+    host.innerHTML = `<div class="note warn">${esc(e.message || String(e))}</div>`;
+  }
+}
+
+async function refreshDevices(opts = {}) {
+  const { deep = true, refreshAdb = false, quiet = false } = opts;
+  const p = $("#devPanel");
+  if (!p) return;
+  const bar = $("#devScanBar");
+  if (bar && !quiet) {
+    bar.style.display = "";
+    bar.innerHTML = `<span class="spin"></span> Scanning…`;
+  }
+  if (!quiet) {
+    p.innerHTML = `<div class="empty" style="padding:24px"><span class="spin"></span>`
+      + ` <span style="margin-left:8px;color:var(--fg2)">`
+      + `${deep ? "Deep" : "Quick"} scan in progress…</span></div>`;
+  }
+  try {
+    const qs = [];
+    if (!deep) qs.push("deep=0");
+    if (refreshAdb) qs.push("refresh_adb=1");
+    const r = await api("devices" + (qs.length ? "?" + qs.join("&") : ""));
+    renderScanBar(r.scan);
+    S.lastScanAt = Date.now();
+    if (bar) {
+      if (S.autoScanOn) {
+        bar.style.display = "";
+        bar.innerHTML = `<span class="dot" style="color:var(--ok)"></span> Live · updated ${relativeTime(new Date(S.lastScanAt).toISOString())}`;
+      } else if (!quiet) {
+        bar.innerHTML = `Scanned ${relativeTime(new Date(S.lastScanAt).toISOString())}`;
+      }
+    }
+    if (!r.devices.length) {
+      p.innerHTML = `<div class="note warn"><b>No device detected</b>
+        ${(r.diagnostics || []).map(esc).join("<br>") ||
+          `Nothing responded on USB. You can still work from an existing
+           extraction — choose <b>Import</b> on the next step.`}</div>
+        <button class="btn sm" id="devAgain">Scan again</button>
+        <button class="btn sm" id="devWhy">Why not?</button>
+        <div id="devDiag"></div>`;
+      syncBatchButtons();
+    } else {
+      const ready = r.devices.filter(d => d.raw?.ready !== false);
+      const blocked = r.devices.filter(d => d.raw?.ready === false);
+      S.connectedDevices = r.devices;
+      if (!S.device && ready.length) {
+        S.device = ready.find(d => d.transport === "mtp") || ready[0];
+      }
+      const scanNote = r.scan
+        ? `<div class="note">${r.count} handset(s) — ${r.ready_count ?? ready.length} ready`
+          + `, ${r.blocked_count ?? blocked.length} blocked`
+          + (r.scan.merged_from > r.count
+            ? ` · unified from ${r.scan.merged_from} transport views` : "")
+          + ` · ${r.scan.elapsed_ms}ms</div>`
+        : "";
+      const summary = r.devices.length > 1
+        ? scanNote + `<div class="note">Tick devices for batch intake, or select one to examine.</div>`
+        : scanNote;
+      p.innerHTML = summary + `<div class="cards">${
+        r.devices.map((d, i) => deviceCardHtml(d, i)).join("")
+      }</div>
+        <button class="btn sm" id="devAgain" style="margin-top:12px">Scan again</button>
+        <button class="btn sm" id="devWhy" style="margin-top:12px">Why not?</button>
+        <div id="devDiag"></div>`;
+      wireDevicePanel(r, p);
+    }
+    if ($("#devAgain")) $("#devAgain").onclick = () => refreshDevices({ deep: true });
+    if ($("#devWhy")) $("#devWhy").onclick = runDeviceDiagnose;
+
+    // Quick scan first, then deep-enrich ready adb devices in the background.
+    if (!deep && !quiet && r.devices.some(d =>
+        d.transport === "adb" && d.raw?.ready && !d.raw?.deep_scan)) {
+      setTimeout(() => refreshDevices({ deep: true, quiet: true }), 80);
+    }
+  } catch (e) {
+    if (bar) bar.style.display = "none";
+    p.innerHTML = `<div class="note warn">Scan failed: ${esc(e.message || String(e))}</div>
+      <button class="btn sm" id="devAgain">Retry</button>`;
+    if ($("#devAgain")) $("#devAgain").onclick = () => refreshDevices({ deep: true });
+  }
+}
+
+async function searchManual(q) {
+  const res = $("#dResults"), mx = $("#dMatrix");
+  if (!q.trim()) return;
+  res.innerHTML = `<span class="spin"></span>`; mx.innerHTML = "";
+  try {
+    const r = await api("manual/search?q=" + encodeURIComponent(q));
+    if (!r.results.length) {
+      res.innerHTML = `<div class="note warn"><b>Not in the device manual</b>
+        This model is not listed. Manual §7 precaution 1 says not to attempt
+        extraction on an unverified device. You can still use <b>Import</b> to
+        analyse an extraction taken elsewhere.</div>`;
+      return;
+    }
+    res.innerHTML = `<div class="cards">${r.results.slice(0, 6).map((p, i) => `
+      <div class="card pick" data-name="${esc(p.name)}">
+        <h3>${esc(p.name)}</h3>
+        <dl class="kv">
+          <dt>OS</dt><dd>${esc(p.os_family)} ${esc(p.os_versions)}</dd>
+          <dt>Chipset</dt><dd>${esc(p.chipset || "—")}</dd>
+          <dt>Released</dt><dd>${esc(p.released || "—")}</dd>
+          <dt>Connector</dt><dd>${esc(p.connector || "—")}</dd>
+        </dl></div>`).join("")}</div>`;
+    res.querySelectorAll(".card.pick").forEach(card =>
+      card.onclick = () => showMatrix(card.dataset.name));
+    showMatrix(r.results[0].name);
+  } catch (e) { res.innerHTML = `<div class="note bad">${esc(e.message)}</div>`; }
+}
+
+async function showMatrix(name) {
+  const mx = $("#dMatrix");
+  mx.innerHTML = `<span class="spin"></span>`;
+  try {
+    const r = await api("manual/show?q=" + encodeURIComponent(name));
+    S.deviceProfile = r;
+    const dev = r.device;
+    mx.innerHTML = `
+      <h2>Capability overview — ${esc(dev.name)}</h2>
+      ${dev.notes ? `<div class="note">${esc(dev.notes)}</div>` : ""}
+      <table><thead><tr><th style="width:230px">Device state</th>
+        <th>Available extraction methods</th></tr></thead><tbody>
+      ${r.capability_overview.map(row => `<tr>
+        <td><b>${esc(row.label)}</b></td>
+        <td>${row.methods.length ? row.methods.map(mth => `
+            <div style="margin-bottom:7px">
+              <span class="pill risk-${esc(mth.risk)}">${esc(mth.risk)} risk</span>
+              <b style="margin-left:6px">${esc(mth.label)}</b>
+              <div style="color:var(--fg2);font-size:12px;margin-top:2px">${
+                esc(mth.description)}</div>
+              ${mth.note ? `<div style="color:var(--warn);font-size:11.5px;
+                margin-top:2px">↳ ${esc(mth.note)}</div>` : ""}
+            </div>`).join("")
+          : '<span style="color:var(--fg3)">No supported method</span>'}</td>
+        </tr>`).join("")}</tbody></table>
+      <div class="note warn">${esc(r.warning)}</div>`;
+    renderNav();
+  } catch (e) { mx.innerHTML = `<div class="note bad">${esc(e.message)}</div>`; }
+}
+
+function methodsForLock(lockState) {
+  if (S.device?.transport === "usbmux" || /iphone|ipad|ios/i.test(S.device?.os_family || S.device?.name || "")) {
+    return ["backup", "comprehensive", "turbo", "import"];
+  }
+  if (S.device?.transport === "mtp") {
+    const adbAlso = (S.devices || []).some(d => d.transport === "adb");
+    return adbAlso
+      ? ["mtp", "comprehensive", "logical", "filesystem", "import"]
+      : ["mtp"];
+  }
+  const profile = S.deviceProfile;
+  const base = ["import"];
+  if (!profile) return devMethodsFallback();
+  const row = (profile.capability_overview || [])
+    .find(r => r.lock_state === lockState);
+  const live = (row?.methods || []).map(m => m.method).filter(m => m !== "import");
+  if (live.some(m => m === "logical" || m === "filesystem")) {
+    live.push("comprehensive", "turbo");
+  }
+  if (live.includes("logical") && navigator.platform.toLowerCase().includes("win")) {
+    live.push("mtp");
+  }
+  return [...new Set([...base, ...live])];
+
+  function devMethodsFallback() {
+    if (S.device?.transport === "mtp") {
+      const adbAlso = (S.devices || []).some(d => d.transport === "adb");
+      return adbAlso
+        ? ["import", "comprehensive", "logical", "filesystem", "mtp", "turbo", "backup"]
+        : ["mtp"];
+    }
+    const methods = S.device
+      ? ["import", "comprehensive", "logical", "filesystem", "turbo", "backup"]
+      : ["import"];
+    if (S.device && navigator.platform.toLowerCase().includes("win")) {
+      methods.push("mtp");
+    }
+    return methods;
+  }
+}
+
+function methodMeta(methodId, lockState) {
+  const profile = S.deviceProfile;
+  if (!profile || methodId === "import") return { enabled: true, note: "" };
+  if (methodId === "comprehensive") {
+    const logical = methodMetaInner("logical", lockState);
+    const fs = methodMetaInner("filesystem", lockState);
+    return {
+      enabled: logical.enabled || fs.enabled,
+      note: logical.enabled || fs.enabled
+        ? "Recommended — 4-pass god-level: logical, app DBs, filesystem, dumpsys/Vivo exports."
+        : "Requires logical or filesystem support for this device.",
+      risk: "medium",
+      label: "Comprehensive (god-level)",
+    };
+  }
+  if (methodId === "turbo") {
+    const ios = S.device?.transport === "usbmux"
+      || /iphone|ipad|ios/i.test(S.device?.os_family || S.device?.name || "");
+    if (ios) {
+      return {
+        enabled: true,
+        note: "iOS turbo — logical backup (or Camera Roll copy if backup tools are missing).",
+        risk: "low",
+        label: "Turbo (fastest)",
+      };
+    }
+    const fs = methodMetaInner("filesystem", lockState);
+    return {
+      enabled: fs.enabled,
+      note: fs.enabled
+        ? "God-mode speed — parallel ADB pulls, 24+ decode workers, fast seal. Best for large intake days."
+        : "Requires filesystem support for this device.",
+      risk: "low",
+      label: "Turbo (fastest)",
+    };
+  }
+  if (methodId === "mtp") {
+    const isWin = navigator.platform.toLowerCase().includes("win");
+    const mtpConnected = S.device?.transport === "mtp";
+    const logical = methodMetaInner("logical", lockState);
+    return {
+      enabled: isWin && (mtpConnected || logical.enabled || !profile),
+      note: mtpConnected
+        ? "Handset detected in file-transfer mode — shared storage copy with hashing."
+        : logical.enabled
+          ? "For handsets in file-transfer mode without USB debugging. Shared storage only."
+          : isWin
+            ? "Connect a handset in file-transfer (MTP) mode, or pick a catalogued profile."
+            : "MTP requires Windows.",
+      risk: "low",
+      label: "MTP (file transfer)",
+    };
+  }
+  return methodMetaInner(methodId, lockState);
+
+  function methodMetaInner(id, lock) {
+    const row = (profile.capability_overview || [])
+      .find(r => r.lock_state === lock);
+    const hit = (row?.methods || []).find(m => m.method === id);
+    return {
+      enabled: !!hit,
+      note: hit?.note || (hit ? "" : "Not supported for this device in the selected lock state."),
+      risk: hit?.risk || "",
+      label: hit?.label || id,
+    };
+  }
+}
+
+/* ═══════════════════════ 4 · EXTRACT ═══════════════════════ */
+async function viewExtract(m) {
+  if (!S.casePath) {
+    m.innerHTML = `<div class="pane"><div class="note warn"><b>Open a case first</b>
+      Go to <b>Case</b> and create or open a case before extracting.</div></div>`;
+    return;
+  }
+  try {
+    await refreshCase();
+  } catch (e) {
+    m.innerHTML = `<div class="pane"><div class="note bad"><b>Could not load case</b>
+      ${esc(e.message)}</div></div>`;
+    return;
+  }
+  if (!S.caseOverview) {
+    m.innerHTML = `<div class="pane"><div class="note bad"><b>Case not loaded</b>
+      Return to <b>Case</b> and open your case again.</div></div>`;
+    return;
+  }
+  if (!hasExhibits() || !S.exhibitId) {
+    S.view = "exhibit";
+    toast("Register and select an exhibit before extraction (Step 3).",
+      { type: "warn" });
+    return route();
+  }
+  if (!S.device) {
+    try {
+      const r = await api("devices?deep=0");
+      S.connectedDevices = r.devices || [];
+      const ready = S.connectedDevices.filter(d => d.raw?.ready !== false);
+      if (ready.length) {
+        S.device = ready.find(d => d.transport === "mtp") || ready[0];
+      }
+    } catch (_) {}
+  }
+  if (!S.exhibitId && (S.caseOverview?.exhibits || []).length) {
+    S.exhibitId = S.caseOverview.exhibits[0].exhibit_id;
+  }
+  const cats = S.env?.categories || [];
+  const dev = S.device;
+  if (dev?.transport === "mtp") S.source = null;
+  const profileName = S.deviceProfile?.device?.name || "";
+  const lockState = () => $("#eLock")?.value || "unlocked";
+  let savedOperator = "";
+  try { savedOperator = sessionStorage.getItem("argus_operator") || ""; } catch (_) {}
+  const defaultOperator = savedOperator || S.caseOverview.investigator || "";
+
+  m.innerHTML = `<div class="pane">
+    <h1>Extraction</h1>
+    <div class="lede">Choose the action, the time span and the artifact
+      categories, then record who is performing the extraction. The operator
+      and exhibit ID are required — they are the chain-of-custody record.
+      <span class="mono" style="display:block;margin-top:6px;color:var(--fg3)">
+      Lab manual §5.5–5.9, Steps 8–13</span></div>
+
+    <div id="resumeBlock"></div>
+    <div id="preflightBlock" class="note" style="margin-bottom:12px;display:none"></div>
+    <div id="mtpTip" style="display:none"></div>
+
+    <h2>Extraction action <span style="font-weight:400;color:var(--fg3)">— Step 8</span></h2>
+    <div class="cards" id="methodCards"></div>
+    <div id="methodNote"></div>
+
+    <div id="sourceBlock"></div>
+
+    <h2>Time span <span style="font-weight:400;color:var(--fg3)">— Step 9</span></h2>
+    <div class="grid">
+      <div class="field"><label>Restrict to</label>
+        <select id="eSpan">
+          <option value="all">All data (nothing excluded by timestamp)</option>
+          <option value="365d">Last 365 days</option>
+          <option value="30d">Last 30 days</option>
+          <option value="7d">Last 7 days</option>
+          <option value="24h">Last 24 hours</option>
+          <option value="custom">Custom range…</option>
+        </select></div>
+      <div class="field" id="customSpan" style="display:none">
+        <label>Range (YYYY-MM-DD..YYYY-MM-DD)</label>
+        <input id="eSpanCustom" placeholder="2026-01-01..2026-03-31" spellcheck="false"></div>
+    </div>
+
+    <h2>Artifact categories <span style="font-weight:400;color:var(--fg3)">— Step 10</span></h2>
+    <div class="inline" style="margin-bottom:8px">
+      <button class="btn sm" id="catAll">Select all</button>
+      <button class="btn sm" id="catNone">Select none</button>
+      <span class="help" style="color:var(--fg3)">Excluding a category speeds up
+        the extraction when you only need specific data.</span></div>
+    <div class="grid" style="grid-template-columns:repeat(auto-fill,minmax(190px,1fr));gap:2px">
+      ${cats.map(c => `<label class="check">
+        <input type="checkbox" class="cat" value="${esc(c)}" checked>
+        <span>${esc(c)}</span></label>`).join("")}
+    </div>
+
+    <h2>File details <span style="font-weight:400;color:var(--fg3)">— Step 11</span></h2>
+    <div class="grid">
+      <div class="field"><label>Operator <span class="req">*</span></label>
+        <input id="eOp" value="${esc(defaultOperator)}"
+          placeholder="Who is performing this extraction"></div>
+      <div class="field"><label>Exhibit</label>
+        <select id="eExhibit">${(S.caseOverview.exhibits || []).map(e =>
+          `<option ${e.exhibit_id === S.exhibitId ? "selected" : ""}
+            value="${esc(e.exhibit_id)}">${esc(e.exhibit_id)} — ${
+            esc([e.make, e.model].filter(Boolean).join(" ") || "unspecified")}
+          </option>`).join("")}</select></div>
+      <div class="field"><label>Device (checked against the manual)</label>
+        <input id="eDevice" value="${esc(profileName || (dev ? dev.name : ""))}"
+          spellcheck="false">
+        <span class="help">Leave blank to skip the capability check when
+          importing.</span></div>
+      <div class="field"><label>Device lock state</label>
+        <select id="eLock">${S.env.lock_states.map(s =>
+          `<option value="${esc(s)}">${esc(s)}</option>`).join("")}</select></div>
+      <div class="field"><label>Owner's own numbers</label>
+        <input id="eOwner" placeholder="+919111222333, owner@example.com">
+        <span class="help">Comma separated. Lets ARGUS tell the device owner
+          apart from their contacts in the connection graph.</span></div>
+      <div class="field"><label>Backup password</label>
+        <input id="ePw" type="password" placeholder="iOS/Android encrypted backup"></div>
+      <div class="field"><label>WhatsApp E2E recovery key</label>
+        <input id="eWaKey" placeholder="64 hex digits from WhatsApp → Chats → Backup"
+          spellcheck="false" autocomplete="off">
+        <span class="help">Required for <code>msgstore.db.crypt15</code> when no device key
+          was pulled. Also accepts spaced groups of digits from a screenshot.</span></div>
+    </div>
+
+    <h2>Recovery options</h2>
+    <label class="check"><input type="checkbox" id="eCarve" checked>
+      <span>Recover deleted records
+        <small>Carve freeblocks, page slack, freelist pages, WAL frames and
+        rollback journals. This is usually the most probative material in the
+        case; turn it off only if you need the fastest possible run.</small>
+      </span></label>
+    <div class="field" style="max-width:280px;margin-top:10px">
+      <label>Carve confidence floor</label>
+      <input type="number" id="eConf" value="0.45" min="0.1" max="0.95" step="0.05">
+      <span class="help">Lower recovers more but admits weaker matches. Every
+        carved record is reported with its own confidence.</span></div>
+
+    <div class="actions">
+      <button class="btn primary" id="eRun">Start extraction</button>
+      <button class="btn" id="eGod">God-level extract</button>
+      <span class="spacer"></span>
+      <label class="check" style="margin-right:12px"><input type="checkbox" id="eAutoPipe" checked>
+        <span>Auto-analyse + intelligence after extract</span></label>
+      <span id="ePreview" class="mono" style="font-size:11px;color:var(--fg3)"></span>
+      <span id="eMsg" class="mono"></span></div>
+
+    <div id="runBlock"></div>
+  </div>`;
+
+  let method = S.preferredMethod || (dev
+    ? (dev.transport === "mtp" ? "mtp"
+      : (dev.transport === "usbmux" || /ios/i.test(dev.os_family || "") ? "backup" : "comprehensive"))
+    : "import");
+  if (dev?.transport === "mtp" && !/ios/i.test(dev.os_family || "")) method = "mtp";
+  if (dev?.transport === "usbmux" || /ios/i.test(dev.os_family || "")) method = "backup";
+  if (method === "ios_backup") method = "backup";
+  S.preferredMethod = "";
+
+  const effectiveMethod = () => {
+    if (S.device?.transport === "usbmux" || /ios/i.test(S.device?.os_family || "")) {
+      const live = method === "import" ? "backup" : method;
+      return live === "ios_backup" ? "backup" : live;
+    }
+    return (S.device?.transport === "mtp" ? "mtp" : method);
+  };
+
+  const METHOD_DEFS = {
+    import: ["Import existing extraction",
+      "MSAB .xry, Cellebrite UFDR, folder, .ab backup, or iOS backup. No device required."],
+    turbo: ["Turbo (fast intake)",
+      "Filesystem-only, parallel pulls. Skips app discovery, dumpsys, comm exports, carving, and hash verify — for bulk lab intake days."],
+    comprehensive: ["Comprehensive (god-level)",
+      "4 passes: logical SMS/MMS query → app DB discovery → filesystem + WAL → dumpsys & Vivo/.vivobackup exports. Best for non-root Android (Vivo Y02, Samsung, etc.)."],
+    logical: ["Logical (Full read)",
+      "Content-provider query only. Fast; pair with filesystem or use Comprehensive for full comms fallbacks."],
+    filesystem: ["File system",
+      "Pull databases with WAL and journal sidecars. This is what makes deleted-record recovery possible."],
+    mtp: ["MTP (file transfer)",
+      "Shared storage only. Vivo Y02: unlock Developer options (tap Software version 7×), or export SMS/vCard on-phone then re-extract."],
+    backup: ["Backup (iOS / Android)",
+      "iPhone: iTunes-style logical backup (messages, calls, app data). Android: adb backup (often empty on Android 12+)."],
+    ios_backup: ["iOS backup",
+      "Full logical backup via libimobiledevice, then decode."],
+  };
+
+  const acquirePayload = () => {
+    const spanEl = $("#eSpan");
+    const span = spanEl && spanEl.value === "custom"
+      ? ($("#eSpanCustom")?.value.trim() || "") : (spanEl?.value || "all");
+    const cats = [...m.querySelectorAll(".cat:checked")].map(c => c.value);
+    const liveMethod = effectiveMethod();
+    return {
+      case_path: S.casePath, password: S.casePassword,
+      exhibit_id: $("#eExhibit").value, operator: $("#eOp").value.trim(),
+      method: liveMethod, time_span: span, categories: cats,
+      device_name: $("#eDevice").value.trim(),
+      lock_state: $("#eLock").value,
+      serial: S.device?.serial || "",
+      transport: S.device?.transport || "",
+      battery: S.device?.battery ?? null,
+      mtp_name: S.device?.name || S.device?.model || "",
+      source_path: liveMethod === "import" ? ($("#eSrc")?.value.trim() || "") : "",
+      backup_password: $("#ePw").value,
+      whatsapp_recovery_key: $("#eWaKey")?.value?.trim() || "",
+      whatsapp_passphrase: $("#ePw").value || "",
+      owner: $("#eOwner").value.trim(),
+      recover_deleted: $("#eCarve").checked,
+      carve_confidence: parseFloat($("#eConf").value) || 0.45,
+      turbo: liveMethod === "turbo",
+      resume: !!S.resumeContainer,
+      resume_container: S.resumeContainer || "",
+      auto_pipeline: !!$("#eAutoPipe")?.checked,
+    };
+  };
+
+  let previewTimer = null;
+  let preflightTimer = null;
+  const paintPreflight = (data) => {
+    const host = $("#preflightBlock");
+    if (!host) return;
+    if (!data || method === "import") {
+      host.style.display = "none";
+      return;
+    }
+    host.style.display = "";
+    const checks = data.checks || [];
+    const rec = (data.preview || {}).recommended_method;
+    const rows = checks.map(c => {
+      const pill = c.ok ? "ok" : "bad";
+      return `<span class="pill ${pill}" title="${esc(c.detail || "")}">${esc(c.label)}</span>`;
+    }).join(" ");
+    const recHtml = rec && rec !== method
+      ? `<div class="note ok" style="margin-top:8px"><b>God-level tip</b> — Manual recommends
+        <b>${esc(rec)}</b> for this handset.
+        <button class="btn sm primary" id="preflightUseRec" style="margin-left:8px">Switch to ${esc(rec)}</button></div>`
+      : (method === "mtp" ? `<div class="note warn" style="margin-top:8px"><b>MTP mode</b> — copies shared storage only.
+        For SMS, contacts, and calls: enable USB debugging → run <b>Comprehensive</b>.</div>` : "");
+    const errs = (data.errors || []).slice(0, 2).map(e =>
+      `<div class="note warn" style="margin-top:6px">${esc(e)}</div>`).join("");
+    const warns = (data.warnings || []).slice(0, 3).map(w =>
+      `<div class="note" style="margin-top:4px;font-size:11px">${esc(w)}</div>`).join("");
+    host.innerHTML = `<b>Preflight</b> ${rows || ""}${recHtml}${errs}${warns}`;
+    $("#preflightUseRec")?.addEventListener("click", () => {
+      method = rec;
+      paintMethodCards();
+      paintMethods();
+      syncTurboRecovery();
+      runAcquirePreview();
+    });
+  };
+  const runAcquirePreflight = () => {
+    clearTimeout(preflightTimer);
+    preflightTimer = setTimeout(async () => {
+      const host = $("#preflightBlock");
+      if (!host || !S.casePath || method === "import") {
+        paintPreflight(null);
+        return;
+      }
+      try {
+        const r = await post("acquire/preflight", acquirePayload());
+        paintPreflight(r);
+        const btn = $("#eRun");
+        if (btn && (r.errors || []).length) btn.disabled = true;
+        else if (btn && S.casePath) btn.disabled = false;
+      } catch (_) {
+        host.style.display = "none";
+      }
+    }, 400);
+  };
+  const runAcquirePreview = () => {
+    clearTimeout(previewTimer);
+    previewTimer = setTimeout(async () => {
+      const btn = $("#eRun");
+      const host = $("#ePreview");
+      if (!host || !S.casePath) {
+        if (host && !S.casePath) {
+          host.innerHTML = `<span class="pill warn">Open a case first</span>`;
+        }
+        return;
+      }
+      try {
+        const r = await post("acquire/preview", acquirePayload());
+        if (r.ok) {
+          host.innerHTML = `<span class="pill ok">Ready</span>`;
+        } else {
+          host.innerHTML = `<span class="pill bad">${esc((r.errors || [])[0] || "Not ready")}</span>`;
+        }
+        if ((r.warnings || []).length) {
+          host.innerHTML += ` <span class="pill warn">${esc(r.warnings[0])}</span>`;
+        }
+        runAcquirePreflight();
+      } catch (e) {
+        host.innerHTML = `<span class="pill bad">${esc(e.message)}</span>`;
+      }
+      if (btn) btn.disabled = false;
+    }, 350);
+  };
+
+  const paintMethodCards = () => {
+    const lock = lockState();
+    const allowed = methodsForLock(lock);
+    if (!allowed.includes(method)) method = allowed[0] || "import";
+    const host = $("#methodCards");
+    host.innerHTML = Object.entries(METHOD_DEFS).map(([id, [title, body]]) => {
+      const meta = methodMeta(id, lock);
+      const enabled = meta.enabled && (id === "import" || !!dev);
+      return methodCard(id, title, body + (meta.note && !enabled
+        ? ` ${meta.note}` : ""), enabled);
+    }).join("");
+    host.querySelectorAll(".card").forEach(card => {
+      if (card.classList.contains("locked")) return;
+      card.onclick = () => {
+        method = card.dataset.m;
+        paintMethodCards();
+        paintMethods();
+        syncTurboRecovery();
+        runAcquirePreview();
+      };
+    });
+    host.querySelectorAll(".card").forEach(c =>
+      c.classList.toggle("sel", c.dataset.m === method));
+    const note = $("#methodNote");
+    if (!dev) {
+      note.innerHTML = `<div class="note">No handset is connected, so live methods are
+        unavailable. <b>Import</b> is selected — including native MSAB .xry containers.</div>`;
+    } else if (dev.transport === "mtp") {
+      note.innerHTML = `<div class="note ok"><b>MTP handset connected</b> — ${
+        esc(dev.name || dev.model || "device")}. Shared storage will be copied from the phone.</div>`;
+    } else if (S.deviceProfile) {
+      const row = (S.deviceProfile.capability_overview || [])
+        .find(r => r.lock_state === lock);
+      const rec = row?.recommended;
+      note.innerHTML = rec && rec !== method
+        ? `<div class="note">Manual recommends <b>${esc(rec)}</b> for ${
+          esc(row?.label || lock)} on ${esc(S.deviceProfile.device.name)}.
+          <div class="actions" style="margin-top:8px">
+            <button class="btn sm primary" id="useRecommended">Use recommended (${esc(rec)})</button>
+          </div></div>`
+        : "";
+      $("#useRecommended")?.addEventListener("click", () => {
+        method = rec;
+        paintMethodCards();
+        paintMethods();
+        syncTurboRecovery();
+        runAcquirePreview();
+      });
+    } else note.innerHTML = "";
+  };
+
+  const paintMethods = () => {
+    m.querySelectorAll("#methodCards .card").forEach(c =>
+      c.classList.toggle("sel", c.dataset.m === method));
+    $("#sourceBlock").innerHTML = method === "import" ? `
+      <h2>Evidence source</h2>
+      <div class="inline" style="max-width:680px">
+        <input id="eSrc" placeholder="Folder, .xry/.xrycase, .ab, iOS backup, UFDR…"
+          spellcheck="false" value="${esc(S.source?.path || "")}">
+        <button class="btn" id="eBrowse">Browse…</button></div>
+      <div id="srcInfo"></div>` : "";
+    if (method === "import") {
+      $("#eBrowse").onclick = () => openBrowser({
+        title: "Choose the evidence folder or backup",
+        start: $("#eSrc").value || S.env.workspace, allowFiles: true,
+        onPick: p => { $("#eSrc").value = p; classify(p); } });
+      $("#eSrc").onchange = () => classify($("#eSrc").value);
+      if (S.source?.path) classify(S.source.path);
+    }
+  };
+  const syncTurboRecovery = () => {
+    const carve = $("#eCarve");
+    if (!carve) return;
+    const turbo = method === "turbo";
+    carve.checked = !turbo;
+    carve.disabled = turbo;
+    const tip = $("#mtpTip");
+    if (tip) {
+      if (method === "mtp") {
+        tip.style.display = "";
+        const isVivo = /vivo|bbk|iqoo/i.test(
+          `${S.device?.manufacturer || ""} ${S.device?.model || ""} ${S.device?.product || ""}`);
+        const vivoBlock = isVivo ? `<div class="note warn" style="margin-top:.6rem">
+          <b>Vivo Y02 — no “Developer options” in Settings?</b>
+          It is <em>hidden</em> until unlocked:
+          <b>Settings → System management → About phone → Version info</b> →
+          tap <b>Software version</b> (or <b>Build number</b>) <b>7–10 times</b>
+          until “You are now a developer”. Then open
+          <b>System management → Developer options</b>, turn on
+          <b>USB debugging</b> and <b>USB debugging (Security settings)</b>,
+          reconnect USB, tap <b>Allow</b> on the phone, and re-run extraction.
+          <br><small>On some builds the menu is under
+          <b>Additional settings</b> instead of System management.</small>
+        </div>` : "";
+        const noAdbBlock = `<div class="note" style="margin-top:.6rem">
+          <b>No USB debugging possible?</b> On the phone first:
+          (1) install <b>SMS Backup &amp; Restore</b> → backup SMS to
+          <code>Download/</code>; (2) Contacts → menu →
+          <b>Import/Export → Export to storage</b> (.vcf);
+          (3) optional WhatsApp chat export. Then run MTP again — ARGUS
+          decodes XML/vCard from the copied tree.
+        </div>`;
+        tip.innerHTML = `<div class="note"><b>MTP — shared storage copy</b>
+          Bulk folder copy (same path Explorer uses). Keep the handset unlocked
+          on a data cable until the log shows complete.
+          ${vivoBlock}${noAdbBlock}
+          <br><small>MTP cannot read app-private databases (/data/data) without
+          USB debugging.</small></div>`;
+      } else if (method === "backup" && /ios|usbmux/i.test(S.device?.os_family || S.device?.transport || "")) {
+        tip.style.display = "";
+        tip.innerHTML = `<div class="note"><b>Apple iPhone / iPad extraction</b>
+          ARGUS will take a logical iTunes-style backup (messages, calls, contacts,
+          app data that allows backup). Unlock the device, tap <b>Trust</b>, and
+          leave it on a data cable. If libimobiledevice is not installed, ARGUS
+          copies Camera Roll from This PC or reuses an existing iTunes backup.</div>`;
+      } else {
+        tip.style.display = "none";
+        tip.innerHTML = "";
+      }
+    }
+  };
+  paintMethodCards();
+  paintMethods();
+  syncTurboRecovery();
+  runAcquirePreview();
+  runAcquirePreflight();
+
+  $("#eLock")?.addEventListener("change", () => { paintMethodCards(); paintMethods(); runAcquirePreview(); });
+
+  m.querySelectorAll("#eOp,#eExhibit,#eDevice,#eLock,#eOwner,.cat,#eSpan,#eSpanCustom,#eCarve,#eConf")
+    .forEach(n => n?.addEventListener("input", runAcquirePreview));
+  m.querySelectorAll("#eOp,#eExhibit,#eDevice,#eLock,.cat,#eSpan")
+    .forEach(n => n?.addEventListener("change", runAcquirePreview));
+
+  $("#eSpan")?.addEventListener("change", e => {
+    $("#customSpan").style.display = e.target.value === "custom" ? "" : "none";
+    runAcquirePreview();
+  });
+  $("#catAll").onclick = () => {
+    m.querySelectorAll(".cat").forEach(c => c.checked = true);
+    runAcquirePreview();
+  };
+  $("#catNone").onclick = () => {
+    m.querySelectorAll(".cat").forEach(c => c.checked = false);
+    runAcquirePreview();
+  };
+
+  $("#eRun").onclick = async () => {
+    const btn = $("#eRun"); $("#eMsg").textContent = "";
+    if (!S.casePath) {
+      $("#eMsg").innerHTML = `<span style="color:var(--danger)">Open a case first.</span>`;
+      return;
+    }
+    if (!S.device) {
+      try {
+        const r = await api("devices?deep=0");
+        S.connectedDevices = r.devices || [];
+        const ready = S.connectedDevices.filter(d => d.raw?.ready !== false);
+        if (ready.length) {
+          S.device = ready.find(d => d.transport === "usbmux")
+            || ready.find(d => /ios/i.test(d.os_family || ""))
+            || ready.find(d => d.transport === "mtp")
+            || ready[0];
+        }
+      } catch (_) {}
+    }
+    if (S.device?.transport === "mtp" && !/ios/i.test(S.device?.os_family || "")) {
+      method = "mtp";
+      S.source = null;
+      paintMethodCards();
+      syncTurboRecovery();
+    }
+    const payload = acquirePayload();
+    const cats = payload.categories;
+    if (!payload.operator) {
+      $("#eMsg").innerHTML = `<span style="color:var(--danger)">Enter the operator name (chain of custody).</span>`;
+      $("#eOp")?.focus();
+      return;
+    }
+    if (!payload.exhibit_id) {
+      $("#eMsg").innerHTML = `<span style="color:var(--danger)">Select an exhibit — register one on the Exhibit step if needed.</span>`;
+      return;
+    }
+    if (!cats.length) {
+      $("#eMsg").innerHTML = `<span style="color:var(--danger)">Select at least one category.</span>`;
+      return;
+    }
+    if (payload.method === "import" && !payload.source_path) {
+      $("#eMsg").innerHTML = `<span style="color:var(--danger)">Choose an evidence folder or backup file to import, or connect the handset for MTP extraction.</span>`;
+      return;
+    }
+    if (payload.method === "mtp" && !payload.serial && !payload.mtp_name) {
+      $("#eMsg").innerHTML = `<span style="color:var(--danger)">No MTP handset detected — go to Device and scan again.</span>`;
+      return;
+    }
+    btn.disabled = true;
+    try {
+      S.lastAcquirePayload = payload;
+      try { sessionStorage.setItem("argus_operator", payload.operator); } catch (_) {}
+      const r = await post("acquire", payload);
+      S.resumeContainer = null;
+      S.exhibitId = $("#eExhibit").value;
+      watchJob(r.job_id, "runBlock", async (job) => {
+        await refreshCase();
+        S.containers = (S.caseOverview.extractions || []).map(x => x.path);
+        const container = (job?.result || {}).container;
+        if (container) S.containers = [container];
+        if (job && job.status === "done") {
+          const auto = payload.auto_pipeline !== false;
+          startAutoTriage(auto);
+        }
+      });
+    } catch (e) {
+      $("#eMsg").innerHTML = `<span style="color:var(--danger)">${esc(e.message)}</span>`;
+      btn.disabled = false;
+    }
+  };
+  $("#eGod").onclick = () => {
+    m.querySelectorAll(".cat").forEach(c => { c.checked = true; });
+    const carve = $("#eCarve");
+    if (carve) { carve.checked = false; carve.disabled = true; }
+    method = dev?.transport === "mtp" ? "mtp" : "comprehensive";
+    paintMethodCards();
+    paintMethods();
+    syncTurboRecovery();
+    const pipe = $("#eAutoPipe");
+    if (pipe) pipe.checked = true;
+    toast("God-level extract — comprehensive, all categories, auto-analyse", { type: "ok" });
+    $("#eRun").click();
+  };
+  const paintResume = async () => {
+    const host = $("#resumeBlock");
+    if (!host || !S.casePath) return;
+    try {
+      const ex = $("#eExhibit")?.value || S.exhibitId || "";
+      const q = `case/incomplete?case_path=${encodeURIComponent(S.casePath)}`
+        + `&exhibit_id=${encodeURIComponent(ex)}`
+        + (S.casePassword ? `&password=${encodeURIComponent(S.casePassword)}` : "");
+      const r = await api(q);
+      if (!r.incomplete?.length) {
+        host.innerHTML = "";
+        S.resumeContainer = null;
+        return;
+      }
+      const hit = r.incomplete[0];
+      host.innerHTML = `<div class="note bad"><b>Incomplete extraction found</b>
+        ${esc(hit.name)} started ${esc((hit.started_at || "").slice(0, 19))}
+        by ${esc(hit.operator || "—")} using <b>${esc(hit.method)}</b>.
+        Partial evidence is preserved — resume instead of starting over.
+        <div class="actions" style="margin-top:10px">
+          <button class="btn primary" id="eResume">Resume extraction</button>
+          <button class="btn" id="eFresh">Start fresh instead</button>
+        </div></div>`;
+      $("#eResume").onclick = () => {
+        S.resumeContainer = hit.path;
+        method = hit.method || method;
+        paintMethodCards();
+        paintMethods();
+        $("#eMsg").innerHTML = `<span class="pill ok">Will resume ${
+          esc(hit.name)}</span>`;
+      };
+      $("#eFresh").onclick = () => {
+        S.resumeContainer = null;
+        host.innerHTML = "";
+      };
+    } catch (_) {
+      host.innerHTML = "";
+    }
+  };
+  $("#eExhibit")?.addEventListener("change", paintResume);
+  paintResume();
+  setStat("Ready to extract");
+}
+
+function methodCard(id, title, body, enabled) {
+  return `<div class="card pick ${enabled ? "" : "locked"}" data-m="${id}"
+    style="${enabled ? "" : "opacity:.4;cursor:not-allowed"}">
+    <h3>${esc(title)}</h3>
+    <div style="color:var(--fg2);font-size:12px">${esc(body)}</div></div>`;
+}
+
+async function classify(path) {
+  const box = $("#srcInfo");
+  if (!box || !path.trim()) return;
+  box.innerHTML = `<div class="note"><span class="spin"></span> Inspecting…</div>`;
+  try {
+    const r = await api("classify?path=" + encodeURIComponent(path));
+    S.source = { path, ...r };
+    const cls = r.encrypted ? "warn" : (r.ok ? "ok" : "bad");
+    let extra = "";
+    if (r.companion_file) {
+      extra += `<div style="margin-top:6px"><b>Data file:</b> <code>${
+        esc(r.companion_file.split(/[\\/]/).pop())}</code></div>`;
+    }
+    if (r.embedded && Object.keys(r.embedded).length) {
+      extra += `<div style="margin-top:6px"><b>Embedded:</b> ${
+        Object.entries(r.embedded).map(([k, v]) => `${v}× ${k}`).join(", ")
+      }</div>`;
+    }
+    if (r.entropy != null) {
+      extra += `<div style="margin-top:6px">Entropy: <b>${
+        r.entropy.toFixed(2)}</b> bits/byte${
+        r.carvable ? " · carvable" : ""}</div>`;
+    }
+    if (r.import_note) {
+      extra += `<div style="margin-top:6px;color:var(--fg2)">${
+        esc(r.import_note)}</div>`;
+    }
+    if (r.recommendation) {
+      extra += `<div style="margin-top:6px">${esc(r.recommendation)}</div>`;
+    }
+    box.innerHTML = `<div class="note ${cls}">
+      <b>${esc(r.kind)}</b> — ${esc(r.detail)}
+      ${r.warning ? `<div style="margin-top:6px;color:var(--warn)">${
+        esc(r.warning)}</div>` : ""}
+      ${extra}
+    </div>`;
+    renderNav();
+  } catch (e) {
+    box.innerHTML = `<div class="note bad">${esc(e.message)}</div>`;
+  }
+}
+
+/* ═══════════════════════ job progress / ETA ═══════════════════════ */
+const JOB_PHASES = [
+  { id: "prepare", label: "Prepare" },
+  { id: "inventory", label: "Inventory" },
+  { id: "transfer", label: "Transfer" },
+  { id: "verify", label: "Verify" },
+  { id: "decode", label: "Decode" },
+];
+const PHASE_WEIGHTS = {
+  prepare: [0, 5], inventory: [5, 15], transfer: [15, 70],
+  verify: [70, 88], decode: [88, 100],
+};
+
+function compositeJobPct(track) {
+  const phase = track.phase || "prepare";
+  const band = PHASE_WEIGHTS[phase] || [0, 100];
+  let inner = 0;
+  if (track.tot > 0) inner = Math.min(1, (track.cur || 0) / track.tot);
+  else if (track.jobsTot > 0) inner = Math.min(1, (track.jobsCur || 0) / track.jobsTot);
+  else inner = Math.min(1, (track.pct || 0) / 100);
+  return band[0] + (band[1] - band[0]) * inner;
+}
+
+function formatDuration(sec) {
+  sec = Math.max(0, Math.round(sec));
+  if (sec < 60) return `${sec}s`;
+  if (sec < 3600) {
+    const m = Math.floor(sec / 60), s = sec % 60;
+    return `${m}m ${String(s).padStart(2, "0")}s`;
+  }
+  const h = Math.floor(sec / 3600);
+  const m = Math.floor((sec % 3600) / 60);
+  return `${h}h ${m}m`;
+}
+
+function humanBytes(n) {
+  n = Number(n) || 0;
+  if (n < 1024) return `${n} B`;
+  if (n < 1024 ** 2) return `${(n / 1024).toFixed(1)} KB`;
+  if (n < 1024 ** 3) return `${(n / (1024 ** 2)).toFixed(1)} MB`;
+  return `${(n / (1024 ** 3)).toFixed(2)} GB`;
+}
+
+function resetJobProgressTrack(jobStartedAt) {
+  const t0 = jobStartedAt ? Date.parse(jobStartedAt) : Date.now();
+  S.jobProgressTrack = {
+    startedAt: Number.isFinite(t0) ? t0 : Date.now(),
+    anchor: null,
+    cur: 0, tot: 0, pct: 0, mod: "", kind: "",
+    phase: "prepare", bytesCur: 0, bytesTot: 0,
+    etaSec: 0, rate: 0, rateUnit: "files/s",
+    lastMessage: "",
+    fileCur: 0, fileTot: 0, subMod: "", subPct: 0,
+    jobsCur: 0, jobsTot: 0,
+  };
+}
+
+function inferPhase(line) {
+  if (line.phase) return line.phase;
+  const mod = (line.module || "").toLowerCase();
+  const msg = (line.message || "").toLowerCase();
+  const st = (line.status || "").toLowerCase();
+  if (mod === "decode" || st === "decode" || mod === "ingest") return "decode";
+  if (mod === "mtp" && msg.includes("list")) return "inventory";
+  if (mod === "mtp" && (msg.includes("hash") || msg.includes("reconcil"))) return "verify";
+  if (mod === "mtp" && (msg.includes("copy") || st === "progress")) return "transfer";
+  if (mod === "engine" && st === "start") return "prepare";
+  if (mod.includes("filesystem") || mod.includes("adb")) return "transfer";
+  return "";
+}
+
+function noteJobProgress(track, line, job) {
+  if (!track) return;
+  const now = Date.now();
+  const phase = inferPhase(line) || (job && job.phase) || track.phase;
+  if (phase) track.phase = phase;
+
+  if (line.batch_pct != null) {
+    track.kind = "batch";
+    track.pct = Math.max(track.pct, Number(line.batch_pct));
+    track.cur = Number(line.batch_current) || track.cur;
+    track.tot = Number(line.batch_total) || track.tot;
+    track.mod = "batch";
+  }
+  if (line.progress_pct != null) {
+    const incomingCur = Number(line.progress_current);
+    const incomingTot = Number(line.progress_total);
+    if (track.kind === "batch") {
+      track.subPct = Number(line.progress_pct);
+      if (Number.isFinite(incomingCur))
+        track.fileCur = Math.max(track.fileCur || 0, incomingCur);
+      if (Number.isFinite(incomingTot))
+        track.fileTot = Math.max(track.fileTot || 0, incomingTot);
+      track.subMod = (line.module || "").toLowerCase();
+    } else {
+      track.kind = "file";
+      if (Number.isFinite(incomingTot) && incomingTot > 0)
+        track.tot = Math.max(track.tot || 0, incomingTot);
+      if (Number.isFinite(incomingCur))
+        track.cur = Math.max(track.cur || 0, incomingCur);
+      if (track.tot > 0) {
+        const cap = (phase === "verify" || phase === "decode") ? 100 : 99.5;
+        track.pct = Math.max(track.pct, Math.min(cap, 100 * track.cur / track.tot));
+      } else
+        track.pct = Math.max(track.pct, Number(line.progress_pct) || 0);
+      track.mod = (line.module || "").toLowerCase();
+    }
+  }
+  if (line.jobs_current != null) track.jobsCur = Number(line.jobs_current);
+  if (line.jobs_total != null) track.jobsTot = Number(line.jobs_total);
+  if (line.bytes_current != null) track.bytesCur = Number(line.bytes_current);
+  if (line.bytes_total != null) track.bytesTot = Number(line.bytes_total);
+  if (line.bytes != null && !line.bytes_total) track.bytesCur += Number(line.bytes);
+  if (line.eta_seconds != null) track.etaSec = Number(line.eta_seconds);
+  if (line.rate != null) track.rate = Number(line.rate);
+  if (line.rate_unit) track.rateUnit = line.rate_unit;
+  if (line.message) track.lastMessage = line.message;
+
+  if (job) {
+    if (job.eta_seconds) track.etaSec = Number(job.eta_seconds);
+    if (job.bytes_current) track.bytesCur = Number(job.bytes_current);
+    if (job.bytes_total) track.bytesTot = Number(job.bytes_total);
+    if (job.rate) track.rate = Number(job.rate);
+    if (job.rate_unit) track.rateUnit = job.rate_unit;
+    if (job.phase) track.phase = job.phase;
+    if (job.progress > 0) track.pct = Math.max(track.pct, job.progress * 100);
+  }
+
+  if (track.cur > 0 && track.tot > 0) {
+    if (!track.anchor || track.cur >= track.anchor.cur + 10) {
+      track.anchor = { at: now, cur: track.cur };
+    }
+  }
+}
+
+function jobProgressSummary(track) {
+  if (!track) return {
+    pct: 0, label: "Starting…", eta: "Estimating…", detail: "",
+    speed: "—", volume: "—", elapsed: "0s", finishAt: "",
+  };
+  const now = Date.now();
+  const elapsed = (now - track.startedAt) / 1000;
+  let pct = Math.min(100, Math.max(0, compositeJobPct(track)));
+  if (track.phase && (track.tot > 0 || track.jobsTot > 0 || track.pct > 0)) {
+    pct = Math.max(pct, Math.min(100, compositeJobPct(track)));
+  } else {
+    pct = Math.min(100, Math.max(0, track.pct || 0));
+  }
+  if (track.tot <= 0 && track.jobsTot > 0) {
+    pct = Math.max(pct, Math.min(95, 100 * (track.jobsCur || 0) / track.jobsTot));
+  }
+
+  let etaSec = track.etaSec || 0;
+  if (!etaSec && track.tot > 0 && track.cur > 0 && track.cur < track.tot && track.anchor) {
+    const span = (now - track.anchor.at) / 1000;
+    if (span >= 5) {
+      const rate = (track.cur - track.anchor.cur) / span;
+      if (rate > 0) etaSec = (track.tot - track.cur) / rate;
+    }
+  }
+  if (!etaSec && track.jobsTot > 0 && track.jobsCur > 0 && track.jobsCur < track.jobsTot && elapsed >= 8) {
+    const rate = track.jobsCur / elapsed;
+    if (rate > 0) etaSec = (track.jobsTot - track.jobsCur) / rate;
+  }
+
+  let eta = "Estimating time…";
+  let finishAt = "";
+  if (etaSec > 0 && (track.cur < track.tot || (track.jobsTot > 0 && track.jobsCur < track.jobsTot))) {
+    const finish = new Date(now + etaSec * 1000);
+    finishAt = finish.toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" });
+    eta = `~${formatDuration(etaSec)} remaining`;
+  } else if (track.tot <= 0 && track.cur > 0 && track.jobsTot > 0) {
+    eta = `${track.jobsCur}/${track.jobsTot} folders copied — listing still running`;
+  } else if (track.tot <= 0 && track.cur > 0) {
+    eta = `${track.cur.toLocaleString()} files on disk — inventory still running`;
+  } else if (track.tot > 0 && track.cur === 0 && elapsed >= 15) {
+    eta = "Waiting for first files…";
+  } else if (pct >= 99 && track.phase !== "verify" && track.phase !== "decode") {
+    eta = "Finishing up…";
+  } else if (track.phase === "verify") {
+    eta = track.tot > 0 && track.cur < track.tot
+      ? `Verifying ${track.cur.toLocaleString()}/${track.tot.toLocaleString()}…`
+      : "Hashing and reconciling…";
+  } else if (track.phase === "decode") {
+    eta = "Decoding artifacts…";
+  }
+
+  let speed = "—";
+  if (track.rate > 0) {
+    speed = track.rateUnit === "files/s"
+      ? `${track.rate.toFixed(1)} files/s`
+      : `${track.rate.toFixed(1)}/s`;
+  } else if (track.cur > 0 && elapsed > 5) {
+    speed = `${(track.cur / elapsed).toFixed(1)} files/s`;
+  }
+
+  let volume = "—";
+  if (track.bytesTot > 0) {
+    volume = `${humanBytes(track.bytesCur)} / ${humanBytes(track.bytesTot)}`;
+  } else if (track.bytesCur > 0) {
+    volume = humanBytes(track.bytesCur);
+  }
+
+  let label = track.lastMessage || "Acquisition in progress";
+  if (track.kind === "batch" && track.tot > 0) {
+    label = `Device ${track.cur} of ${track.tot}`;
+    if (track.fileTot > 0) {
+      const kind = track.subMod === "mtp" ? "MTP" : "Files";
+      label += ` · ${kind}: ${track.fileCur.toLocaleString()} / ${track.fileTot.toLocaleString()}`;
+    }
+  } else if (track.tot > 0) {
+    const kind = track.mod === "mtp" ? "MTP" : "Files";
+    label = `${kind}: ${track.cur.toLocaleString()} / ${track.tot.toLocaleString()}`;
+  } else if (track.cur > 0) {
+    label = `${track.cur.toLocaleString()} files on disk`;
+    if (track.jobsTot > 0)
+      label += ` · ${track.jobsCur}/${track.jobsTot} folders`;
+  }
+
+  const phaseLabel = (JOB_PHASES.find(p => p.id === track.phase) || {}).label || "Working";
+  return {
+    pct, label, eta, detail: `${formatDuration(elapsed)} elapsed`,
+    speed, volume, elapsed: formatDuration(elapsed), finishAt, phaseLabel,
+  };
+}
+
+function paintJobPhases(track, host) {
+  if (!host) return;
+  const order = JOB_PHASES.map(p => p.id);
+  const idx = Math.max(0, order.indexOf(track.phase || "prepare"));
+  host.innerHTML = JOB_PHASES.map((p, i) => {
+    const cls = i < idx ? "done" : (i === idx ? "active" : "");
+    return `<span class="job-phase ${cls}">${esc(p.label)}</span>`;
+  }).join("");
+}
+
+function paintJobProgress(refs, track) {
+  const sum = jobProgressSummary(track);
+  const { prog, progBar, progPct, progEta, progLabel, progPhases,
+          statEta, statElapsed, statSpeed, statVolume, phaseTitle } = refs;
+  if (sum.pct > 0) {
+    prog.classList.remove("indet");
+    progBar.style.width = `${sum.pct}%`;
+  }
+  if (progPct) progPct.textContent = `${sum.pct.toFixed(0)}%`;
+  if (progEta) {
+    progEta.innerHTML = `${esc(sum.eta)}${
+      sum.finishAt ? `<div class="sub">Done ~${esc(sum.finishAt)}</div>` : ""}`;
+  }
+  if (progLabel) progLabel.textContent = sum.label;
+  if (phaseTitle) phaseTitle.textContent = sum.phaseLabel;
+  if (statEta) statEta.textContent = sum.eta.replace(" remaining", "");
+  if (statElapsed) statElapsed.textContent = sum.elapsed;
+  if (statSpeed) statSpeed.textContent = sum.speed;
+  if (statVolume) statVolume.textContent = sum.volume;
+  paintJobPhases(track, progPhases);
+  S.jobProgress = sum.pct;
+}
+
+/* ═══════════════════════ job watcher ═══════════════════════ */
+function startAutoTriage(openAnalyse = false) {
+  if (!S.containers.length) return;
+  toast("God-level triage — ranking findings on the sealed extraction", { type: "ok" });
+  post("intelligence/run", {
+    containers: S.containers,
+    owner: $("#eOwner")?.value || S.owner || "",
+  }).then(r => {
+    if (r.job_id && $("#runBlock")) {
+      watchJob(r.job_id, "runBlock", () => {
+        S.intel = null;
+        if (openAnalyse) {
+          S.view = "analyse";
+          renderNav();
+          route();
+          toast("God-level pipeline complete — command center ready", { type: "ok" });
+        } else {
+          toast("Findings ready — open the Findings step", { type: "ok" });
+        }
+      });
+    } else if (openAnalyse) {
+      S.view = "analyse";
+      renderNav();
+      route();
+    }
+  }).catch(e => toast(e.message, { type: "bad" }));
+}
+
+function watchJob(jobId, mountId, onDone) {
+  S.jobSeq = 0;
+  S.jobProgress = 0;
+  resetJobProgressTrack();
+  const mount = $("#" + mountId);
+  if (!mount) {
+    const poll = async () => {
+      try {
+        const j = await api(`job?id=${jobId}&since=0`);
+        S.job = j;
+        if (["done", "failed", "cancelled"].includes(j.status)) {
+          if (onDone) await onDone(j);
+          return;
+        }
+      } catch (_) {}
+      setTimeout(poll, 900);
+    };
+    poll();
+    return;
+  }
+  mount.innerHTML = `
+    <h2>Extraction log</h2>
+    <div class="job-progress-card">
+      <h3>Live acquisition <span class="phase-pill" id="jobPhaseTitle">Starting</span></h3>
+      <div class="job-phase-row" id="jobPhases"></div>
+      <div class="progress indet" id="jobProg"><i id="jobProgBar"></i></div>
+      <div class="job-progress-meta">
+        <span class="pct" id="jobProgPct">0%</span>
+        <span class="eta" id="jobProgEta">Estimating time…</span>
+      </div>
+      <div class="job-statgrid">
+        <div class="job-stat"><div class="lbl">Time left</div><div class="val" id="jobStatEta">—</div></div>
+        <div class="job-stat"><div class="lbl">Elapsed</div><div class="val" id="jobStatElapsed">0s</div></div>
+        <div class="job-stat"><div class="lbl">Speed</div><div class="val" id="jobStatSpeed">—</div></div>
+        <div class="job-stat"><div class="lbl">Data</div><div class="val" id="jobStatVolume">—</div></div>
+      </div>
+      <div class="job-progress-detail mono" id="jobProgLabel">Waiting for progress…</div>
+    </div>
+    <div class="logwrap" id="logBox"></div>
+    <div class="actions">
+      <button class="btn danger sm" id="jCancel">Request cancel</button>
+      <span class="spacer"></span>
+      <span class="mono" id="jStat"></span></div>
+    <div id="jResult"></div>`;
+  mount.scrollIntoView({ behavior: "smooth", block: "start" });
+  $("#jCancel").onclick = () => post("job/cancel", { id: jobId });
+
+  const box = $("#logBox");
+  const refs = {
+    prog: $("#jobProg"),
+    progBar: $("#jobProgBar"),
+    progPct: $("#jobProgPct"),
+    progEta: $("#jobProgEta"),
+    progLabel: $("#jobProgLabel"),
+    progPhases: $("#jobPhases"),
+    phaseTitle: $("#jobPhaseTitle"),
+    statEta: $("#jobStatEta"),
+    statElapsed: $("#jobStatElapsed"),
+    statSpeed: $("#jobStatSpeed"),
+    statVolume: $("#jobStatVolume"),
+  };
+  const track = S.jobProgressTrack;
+  const updateProgress = (line, job) => {
+    noteJobProgress(track, line, job);
+    paintJobProgress(refs, track);
+  };
+  let lastLive = "";
+  clearInterval(S.jobTimer);
+  const poll = async () => {
+    try {
+      const j = await api(`job?id=${jobId}&since=${S.jobSeq}`);
+      S.job = j;
+      if (j.started_at && !track._synced) {
+        track.startedAt = Date.parse(j.started_at) || track.startedAt;
+        track._synced = true;
+      }
+      j.log.forEach(line => {
+        S.jobSeq = line.seq;
+        updateProgress(line, j);
+        const warn = line.level === "warning" || line.status === "warning";
+        if (warn && (line.module === "device" || line.module === "mtp.session"
+            || line.module === "adb.session")) {
+          S.deviceHealth = {
+            ok: false,
+            label: line.module.replace(".session", "").toUpperCase(),
+            detail: line.message,
+          };
+        } else if (line.status === "ok" && line.module?.includes("session")) {
+          S.deviceHealth = { ok: true, label: "Device OK", detail: line.message };
+        }
+        const d = el("div", "logline " + (line.level || "info") + (warn ? " warnline" : ""));
+        d.innerHTML = `<span class="t">${esc((line.ts || "").slice(11, 23))}</span>
+          <span class="m">${esc(line.module)}</span>
+          <span class="s">${esc(line.status)}</span>
+          <span>${esc(line.message)}</span>`;
+        box.appendChild(d);
+        lastLive = `${line.module}: ${line.message}`;
+      });
+      if (j.status === "running") {
+        noteJobProgress(track, {}, j);
+        paintJobProgress(refs, track);
+      }
+      if (j.log.length) {
+        box.scrollTop = box.scrollHeight;
+        setStat(lastLive);
+      }
+      $("#jStat").textContent = `${j.status} · ${j.log_length} log lines`;
+      renderHeader();
+
+      if (["done", "failed", "cancelled"].includes(j.status)) {
+        clearInterval(S.jobTimer);
+        refs.prog.classList.remove("indet");
+        refs.progBar.style.width = "100%";
+        const sum = jobProgressSummary(track);
+        if (refs.progPct) refs.progPct.textContent = "100%";
+        if (refs.progEta) refs.progEta.textContent = j.status === "done" ? "Complete" : j.status;
+        if (refs.progLabel) {
+          refs.progLabel.textContent = j.status === "done"
+            ? `Finished in ${sum.elapsed}`
+            : j.status;
+        }
+        if (refs.statEta) refs.statEta.textContent = j.status === "done" ? "Done" : j.status;
+        $("#jCancel").disabled = true;
+        renderJobResult(j);
+        if (onDone) await onDone(j);
+        renderNav();
+      }
+    } catch (e) {
+      $("#jStat").innerHTML = `<span style="color:var(--warn)">Reconnecting… ${esc(e.message)}</span>`;
+      S.jobPollBackoff = Math.min(2000, (S.jobPollBackoff || 250) * 1.5);
+      clearInterval(S.jobTimer);
+      S.jobTimer = setTimeout(poll, S.jobPollBackoff);
+    }
+  };
+  S.jobPollBackoff = 250;
+  poll();
+  S.jobTimer = setInterval(poll, 250);
+}
+
+function renderJobResult(j) {
+  const out = $("#jResult");
+  if (!out) return;
+  if (j.status === "failed") {
+    out.innerHTML = `<div class="note bad"><b>Extraction failed</b>${
+      esc(j.error)}</div>
+      ${j.traceback ? `<details style="margin-top:10px"><summary class="mono" style="cursor:pointer">Technical details</summary>
+        <pre style="white-space:pre-wrap;font-size:11px;margin-top:8px;color:var(--fg3)">${esc(j.traceback)}</pre></details>` : ""}
+      <div class="actions">
+        <button class="btn primary" id="retryAcquire">Retry with same settings</button>
+        <button class="btn" id="diagDevice">Diagnose connection</button>
+        <button class="btn sm" id="copyErr">Copy error</button>
+      </div>`;
+    $("#retryAcquire")?.addEventListener("click", async () => {
+      if (!S.lastAcquirePayload) return;
+      try {
+        const r = await post("acquire", S.lastAcquirePayload);
+        watchJob(r.job_id, "runBlock", async () => {
+          await refreshCase();
+          S.containers = (S.caseOverview.extractions || []).map(x => x.path);
+        });
+      } catch (e) { toast(e.message, { type: "bad" }); }
+    });
+    $("#diagDevice")?.addEventListener("click", () => {
+      S.view = "device"; renderNav(); route();
+    });
+    $("#copyErr")?.addEventListener("click", () => {
+      navigator.clipboard?.writeText(`${j.error}\n\n${j.traceback || ""}`);
+      toast("Copied to clipboard", { type: "ok" });
+    });
+    const btn = $("#eRun"); if (btn) btn.disabled = false;
+    return;
+  }
+  const r = j.result || {};
+  if (r.results && r.total != null) {
+    const rows = (r.results || []).map(x =>
+      `<tr><td>${esc(x.exhibit_id || "—")}</td><td class="mono">${
+        esc(x.serial)}</td><td>${esc(x.status)}</td><td>${num(x.artifacts)}</td>`
+      + `<td class="mono">${esc((x.container || "").split(/[\\/]/).pop() || "—")}</td>`
+      + `${x.error ? `<td class="mono" style="color:var(--danger)">${esc(x.error)}</td>`
+        : "<td></td>"}</tr>`).join("");
+    out.innerHTML = `<div class="note ${r.failed ? "warn" : "ok"}"><b>Batch extraction complete</b>
+      ${num(r.completed)} succeeded · ${num(r.failed)} failed · ${num(r.skipped)} skipped</div>
+      <table class="tbl"><thead><tr><th>Exhibit</th><th>Serial</th><th>Status</th>
+      <th>Artifacts</th><th>Container</th><th>Error</th></tr></thead><tbody>${rows}</tbody></table>
+      <div class="actions">
+        ${r.failed ? `<button class="btn primary" id="retryBatchFailed">Retry failed (${r.failed})</button>` : ""}
+        <button class="btn" id="goAnalyse">Review case extractions →</button>
+      </div>`;
+    $("#retryBatchFailed")?.addEventListener("click", async () => {
+      if (!S.lastBatchPayload) return;
+      const failed = (r.results || []).filter(x =>
+        x.status === "failed" || x.error);
+      if (!failed.length) return;
+      const orig = S.lastBatchPayload.devices || [];
+      const bySerial = Object.fromEntries(orig.map(d => [d.serial, d]));
+      try {
+        const body = {
+          ...S.lastBatchPayload,
+          all_connected: false,
+          devices: failed.map(x => {
+            const base = bySerial[x.serial] || {};
+            return {
+              serial: x.serial,
+              exhibit_id: x.exhibit_id || base.exhibit_id || "",
+              device_name: x.device_name || base.device_name || "",
+              method: base.method || S.lastBatchPayload.method || "turbo",
+              transport: base.transport || "",
+              mtp_name: base.mtp_name || "",
+              make: base.make || "",
+              model: base.model || "",
+              imei: base.imei || "",
+            };
+          }),
+        };
+        S.lastBatchPayload = body;
+        const resp = await post("acquire/batch", body);
+        toast(`Retrying ${failed.length} failed device(s)`, { type: "warn" });
+        watchJob(resp.job_id, "runBlock", async () => {
+          await refreshCase();
+          S.containers = (S.caseOverview.extractions || []).map(x => x.path);
+        });
+      } catch (e) { toast(e.message, { type: "bad" }); }
+    });
+    $("#goAnalyse")?.addEventListener("click", () => { S.view = "analyse"; renderNav(); route(); });
+    return;
+  }
+  if (j.kind === "report") {
+    out.innerHTML = `<div class="note ok"><b>Report generated</b>
+      ${num(r.artifact_count)} artifacts · ${num(r.deleted_count)} recovered
+      from deleted space</div>
+      <table><thead><tr><th>File</th><th>Size</th><th>Location</th></tr></thead>
+      <tbody>${(r.files || []).map(f => `<tr><td><b>${esc(f.name)}</b></td>
+        <td class="mono">${human(f.size)}</td>
+        <td class="mono">${esc(f.path)}</td></tr>`).join("")}</tbody></table>`;
+    S.lastReport = r;
+    return;
+  }
+  const bad = (r.integrity_failures || []).length;
+  const audits = r.audit_warnings || [];
+  const crit = audits.filter(a => a.severity === "critical");
+  const action = audits.filter(a => a.severity === "action_required");
+  const decodePct = r.decode_coverage_pct != null ? r.decode_coverage_pct : null;
+  const commsCats = ["Messages", "Contacts", "Calls", "Chats"];
+  const commsKpi = commsCats.map(c => {
+    const n = (r.categories || {})[c] || 0;
+    return n > 0 ? `<span class="pill ok">${esc(c)}: ${num(n)}</span>` : "";
+  }).filter(Boolean).join(" ");
+  const acqSum = r.acquisition_summary || {};
+  const providerRows = acqSum.comms_row_total || 0;
+  const mtpBanner = (r.method === "mtp" && !providerRows && !commsKpi)
+    ? `<div class="note warn"><b>MTP limitation</b> — live SMS/contacts/calls were not acquired.
+      Enable USB debugging and re-run <b>Comprehensive</b> for full communications.</div>` : "";
+  out.innerHTML = `
+    <div class="note ${bad ? "warn" : "ok"}"><b>${esc(r.status || "Completed")}</b>
+      ${num(r.artifacts)} artifacts decoded, of which
+      <b>${num(r.deleted_recovered)}</b> were recovered from deleted or
+      unallocated space and were not visible to the device user.</div>
+    ${mtpBanner}
+    ${commsKpi ? `<div class="inline" style="margin:8px 0;gap:6px;flex-wrap:wrap">${commsKpi}</div>` : ""}
+    ${providerRows ? `<div class="note" style="margin-bottom:8px">Acquisition captured <b>${num(providerRows)}</b> live provider row(s) before decode.</div>` : ""}
+    <div id="extractRecs" class="grid one" style="margin:10px 0"></div>
+    ${decodePct != null ? `<div class="grid three" style="margin-bottom:12px">
+      <div class="card"><h3>Decode coverage</h3>
+        <div class="big">${decodePct}%</div>
+        <div class="muted">${num(r.files_parsed)} / ${num(r.files_seen)} files parsed</div></div>
+      <div class="card"><h3>Acquired</h3>
+        <div class="big">${num(r.files_acquired)}</div>
+        <div class="muted">${human(r.bytes_acquired)}</div></div>
+      <div class="card"><h3>Duration</h3>
+        <div class="big">${r.duration_seconds}s</div>
+        <div class="muted">${esc(r.method || "extraction")}</div></div>
+    </div>` : ""}
+    ${crit.length ? `<div class="note bad"><b>Critical</b><br>${crit.map(a => esc(a.message)).join("<br>")}</div>` : ""}
+    ${action.length ? `<div class="note warn"><b>Action required</b><br>${action.map(a => esc(a.message)).join("<br>")}</div>` : ""}
+    <div class="grid two">
+      <div class="card"><h3>Extraction</h3><dl class="kv">
+        <dt>Container</dt><dd>${esc((r.container || "").split(/[\\/]/).pop())}</dd>
+        <dt>Location</dt><dd class="mono" style="word-break:break-all;font-size:11px">${esc(r.container || "—")}</dd>
+        ${r.export_zip ? `<dt>ZIP file</dt><dd class="mono" style="word-break:break-all;font-size:11px">${esc(r.export_zip)}</dd>` : ""}
+        <dt>Duration</dt><dd>${r.duration_seconds}s</dd>
+        <dt>Files</dt><dd>${num(r.files_acquired)}</dd>
+        <dt>Acquired</dt><dd>${human(r.bytes_acquired)}</dd>
+        <dt>Seal</dt><dd>${esc((r.seal?.container_seal || "").slice(0, 24))}…</dd>
+      </dl></div>
+      <div class="card"><h3>Categories</h3><dl class="kv">
+        ${Object.entries(r.categories || {}).map(([k, v]) =>
+          `<dt>${esc(k)}</dt><dd>${num(v)}</dd>`).join("")}
+      </dl></div>
+    </div>
+    ${(r.warnings || []).length ? `<div class="note warn"><b>${
+      r.warnings.length} warning(s)</b>${r.warnings.slice(0, 8)
+        .map(esc).join("<br>")}</div>` : ""}
+    <div class="note" style="margin-top:12px">Extraction saved as a portable <b>.afc.zip</b> file — copy it anywhere and import or analyse later.</div>
+    <div class="actions">
+      ${r.export_zip ? `<button class="btn primary" id="openZip">Open ZIP file</button>` : ""}
+      <button class="btn ${r.export_zip ? "" : "primary"}" id="openContainer">Open extraction folder</button>
+      ${r.export_zip ? "" : `<button class="btn" id="saveContainerZip">Save as ZIP</button>`}
+      <button class="btn sm" id="copyContainerPath">Copy path</button>
+      <button class="btn" id="goAnalyse">Analyse this extraction →</button>
+      <button class="btn" id="goIntel">Run intelligence →</button>
+      <button class="btn" id="goAgain">Run another extraction</button></div>`;
+  $("#openZip")?.addEventListener("click", () => openContainerFolder(r.export_zip));
+  $("#openContainer")?.addEventListener("click", () => openContainerFolder(r.container));
+  if (!r.export_zip) $("#saveContainerZip")?.addEventListener("click", () => saveContainerZip(r.container));
+  $("#copyContainerPath")?.addEventListener("click", () => {
+    const text = r.export_zip || r.container || "";
+    navigator.clipboard?.writeText(text);
+    toast("Path copied to clipboard", { type: "ok" });
+  });
+  if ($("#goAnalyse")) $("#goAnalyse").onclick = async () => {
+    await refreshCase();
+    S.containers = (S.caseOverview?.extractions || []).map(x => x.path);
+    if (!S.containers.length && r.container) S.containers = [r.container];
+    S.view = "analyse"; renderNav(); route(); };
+  if ($("#goIntel")) $("#goIntel").onclick = async () => {
+    await refreshCase();
+    S.containers = (S.caseOverview?.extractions || []).map(x => x.path);
+    if (!S.containers.length && r.container) S.containers = [r.container];
+    S.view = "findings"; S.intel = null; renderNav(); route(); };
+  if ($("#goAgain")) $("#goAgain").onclick = () => { S.view = "extract"; route(); };
+  if (r.container) {
+    api(`dashboard?containers=${encodeURIComponent(r.container)}`).then(dash => {
+      const recs = dash.recommendations || [];
+      const host = $("#extractRecs");
+      if (!host || !recs.length) return;
+      host.innerHTML = `<h3 style="margin:0 0 8px">Next steps</h3>` + recs.slice(0, 4).map(rec =>
+        `<div class="card" style="margin-bottom:8px;cursor:pointer" data-view="${esc(rec.view || "")}">
+          <b>${esc(rec.title)}</b>
+          <div class="muted" style="font-size:12px;margin-top:4px">${esc(rec.detail || "")}</div>
+          <span class="pill ${rec.severity === "critical" ? "bad" : rec.severity === "high" ? "warn" : "ok"}">${esc(rec.severity || "info")}</span>
+        </div>`).join("");
+      host.querySelectorAll(".card[data-view]").forEach(card => {
+        card.onclick = () => {
+          const v = card.dataset.view;
+          if (v === "extract") S.view = "extract";
+          else if (v === "findings") S.view = "findings";
+          else S.view = "analyse";
+          renderNav(); route();
+        };
+      });
+    }).catch(() => {});
+  }
+}
+
+/* ═══════════════════════ 5 · ANALYSE ═══════════════════════ */
+async function viewAnalyse(m) {
+  await refreshCase();
+  const ex = S.caseOverview.extractions || [];
+  if (!ex.length) {
+    m.innerHTML = `<div class="pane"><div class="note"><b>Nothing to analyse yet</b>
+      Run an extraction first.</div></div>`;
+    return;
+  }
+  if (!S.containers.length) S.containers = ex.map(x => x.path);
+
+  m.innerHTML = `<div class="pane wide">
+    <h1>Analyse — Horizon</h1>
+    <div class="lede">MSAB XAMN-grade examination, and beyond. Select which
+      extractions to load. Containers open read-only and are verified on
+      open — evidence cannot be altered from here.
+      <span class="mono" style="display:block;margin-top:6px;color:var(--fg3)">
+      Lab manual §6, Steps 14–20</span></div>
+    <div class="cards" id="exCards">${ex.map(x => `
+      <div class="card pick ${S.containers.includes(x.path) ? "sel" : ""}"
+           data-path="${esc(x.path)}">
+        <h3>${esc(x.exhibit_id)}
+          <span class="pill ${x.sealed ? "ok" : "warn"}">${esc(x.status)}</span></h3>
+        <dl class="kv">
+          <dt>Device</dt><dd>${esc(x.device || "—")}</dd>
+          <dt>Method</dt><dd>${esc(x.method)}</dd>
+          <dt>Artifacts</dt><dd>${num(x.artifacts)}</dd>
+          <dt>Size</dt><dd>${human(x.size_bytes)}</dd>
+          <dt>Created</dt><dd>${esc((x.created_at || "").slice(0, 19))}</dd>
+          ${x.zip_path ? `<dt>ZIP</dt><dd class="mono" style="font-size:11px;word-break:break-all">${esc(x.zip_path.split(/[\\/]/).pop())}</dd>` : ""}
+        </dl>
+        <div class="actions" style="margin-top:10px">
+          ${x.zip_path ? `<button class="btn sm open-zip-btn" data-path="${esc(x.zip_path)}">ZIP</button>` : ""}
+          <button class="btn sm open-container-btn" data-path="${esc(x.path)}">Open</button>
+          ${!x.zip_path ? `<button class="btn sm save-container-btn" data-path="${esc(x.path)}">Save ZIP</button>` : ""}
+        </div></div>`).join("")}</div>
+    <div class="actions">
+      <button class="btn primary" id="aOpen">Open analysis view</button>
+      <button class="btn" id="aOpenZip">Open portable ZIP…</button>
+      <button class="btn" id="aVerify">Verify integrity</button>
+      <button class="btn" id="aFindings">Findings →</button>
+      <button class="btn" id="aReport">Go to report →</button>
+      <span class="spacer"></span>
+      <span class="mono" id="aSel"></span></div>
+    <div id="aOut"></div>
+  </div>`;
+
+  const paint = () => {
+    m.querySelectorAll("#exCards .card").forEach(c =>
+      c.classList.toggle("sel", S.containers.includes(c.dataset.path)));
+    $("#aSel").textContent = `${S.containers.length} of ${ex.length} selected`;
+  };
+  m.querySelectorAll(".open-zip-btn").forEach(btn => {
+    btn.onclick = (e) => { e.stopPropagation(); openContainerFolder(btn.dataset.path); };
+  });
+  m.querySelectorAll(".open-container-btn").forEach(btn => {
+    btn.onclick = (e) => { e.stopPropagation(); openContainerFolder(btn.dataset.path); };
+  });
+  m.querySelectorAll(".save-container-btn").forEach(btn => {
+    btn.onclick = (e) => { e.stopPropagation(); saveContainerZip(btn.dataset.path); };
+  });
+  m.querySelectorAll("#exCards .card").forEach(card => {
+    card.onclick = () => {
+      const p = card.dataset.path;
+      S.containers = S.containers.includes(p)
+        ? S.containers.filter(x => x !== p) : [...S.containers, p];
+      paint();
+    };
+  });
+  paint();
+
+  $("#aOpen").onclick = () => openAnalysis();
+  $("#aOpenZip").onclick = () => openBrowser({
+    title: "Open ARGUS extraction ZIP — choose file",
+    start: S.env?.workspace || "",
+    allowFiles: true,
+    onPick: async (path) => {
+      if (!/\.zip$/i.test(path)) {
+        toast("Choose an .afc.zip extraction file", { type: "bad" });
+        return;
+      }
+      S.containers = [path];
+      toast("ZIP loaded — opening analysis", { type: "ok" });
+      openAnalysis();
+    },
+  });
+  $("#aReport").onclick = () => { S.view = "report"; renderNav(); route(); };
+  $("#aFindings").onclick = () => { S.intel = null; S.view = "findings";
+    renderNav(); route(); };
+  $("#aVerify").onclick = async () => {
+    const out = $("#aOut");
+    out.innerHTML = `<div class="note"><span class="spin"></span>
+      Re-hashing every blob and re-walking the custody chain…</div>`;
+    try {
+      const r = await api("verify?deep=1&containers=" +
+                          encodeURIComponent(S.containers.join("\n")));
+      out.innerHTML = r.results.map(c => `
+        <div class="note ${c.ok ? "ok" : "bad"}">
+          <b>${esc(c.container)} — ${c.ok ? "VERIFIED" : "VERIFICATION FAILED"}</b>
+          ${c.blobs_checked} blobs re-hashed · ${c.audit_entries} custody
+          entries · chain ${c.audit_chain_valid ? "valid" : "BROKEN"}
+          ${(c.problems || []).length ? "<br>" + c.problems.map(esc).join("<br>") : ""}
+        </div>`).join("");
+    } catch (e) { out.innerHTML = `<div class="note bad">${esc(e.message)}</div>`; }
+  };
+  setStat(`${ex.length} extraction(s) in this case`);
+}
+
+/* ═══════════════════════ 5b · FINDINGS ═══════════════════════ */
+async function viewFindings(m) {
+  await refreshCase();
+  const ex = S.caseOverview.extractions || [];
+  if (!ex.length) {
+    m.innerHTML = `<div class="pane"><div class="note"><b>Nothing to analyse yet</b>
+      Run an extraction first.</div></div>`;
+    return;
+  }
+  if (!S.containers.length) S.containers = ex.map(x => x.path);
+
+  m.innerHTML = `<div class="pane">
+    <h1>Findings</h1>
+    <div class="lede">Ranked investigative leads produced by explicit rules over
+      every artifact. Each finding cites the artifacts it came from, states why
+      it matters, and states the caveat that would make it wrong — a lead
+      presented without its counter-argument invites over-reading.</div>
+    <div class="inline" style="max-width:640px;margin-bottom:14px">
+      <input id="fOwner" placeholder="Owner's own numbers (comma separated) — improves accuracy"
+        value="${esc(S.owner)}" spellcheck="false">
+      <button class="btn primary" id="fRun">Analyse</button>
+    </div>
+    <h2>Hash-set screening</h2>
+    <p class="lede" style="margin-bottom:10px">Load NSRL or known-bad lists to
+      flag or suppress artifacts during analysis. Nothing is deleted — hits are
+      recorded as findings.</p>
+    <div class="grid" style="max-width:720px;margin-bottom:14px">
+      <div class="field"><label>Known-good set (NSRL)</label>
+        <div class="inline"><input id="hsGood" spellcheck="false"
+          placeholder="Path to .csv or .txt digest list">
+        <button class="btn sm" id="hsBrowseGood">Browse…</button>
+        <button class="btn sm" id="hsLoadGood">Load</button></div></div>
+      <div class="field"><label>Known-bad set</label>
+        <div class="inline"><input id="hsBad" spellcheck="false"
+          placeholder="Path to blocklist">
+        <button class="btn sm" id="hsBrowseBad">Browse…</button>
+        <button class="btn sm" id="hsLoadBad">Load</button></div></div>
+    </div>
+    <div id="hsStatus" class="mono" style="font-size:11px;color:var(--fg3);margin-bottom:14px"></div>
+    <div id="fOut"><div class="empty"><span class="spin"></span>
+      Running the rule set…</div></div>
+  </div>`;
+  $("#fRun").onclick = () => { S.owner = $("#fOwner").value.trim();
+    S.intel = null; loadFindings(); };
+  $("#hsBrowseGood").onclick = () => openBrowser({
+    title: "Choose known-good hash set",
+    allowFiles: true,
+    onPick: p => { $("#hsGood").value = p; },
+  });
+  $("#hsBrowseBad").onclick = () => openBrowser({
+    title: "Choose known-bad hash set",
+    allowFiles: true,
+    onPick: p => { $("#hsBad").value = p; },
+  });
+  const loadHs = async (kind) => {
+    const path = (kind === "known-good" ? $("#hsGood") : $("#hsBad")).value.trim();
+    if (!path) return;
+    $("#hsStatus").textContent = "Loading…";
+    try {
+      const r = await post("hashset/load", { path, kind });
+      $("#hsStatus").textContent =
+        `Loaded ${r.set.name} (${r.set.entries || r.set.size || 0} digests) — ${r.count} set(s) active`;
+      toast(`Hash set loaded: ${r.set.name}`, { type: "ok" });
+      S.intel = null;
+      loadFindings();
+    } catch (e) {
+      $("#hsStatus").textContent = e.message;
+    }
+  };
+  $("#hsLoadGood").onclick = () => loadHs("known-good");
+  $("#hsLoadBad").onclick = () => loadHs("known-bad");
+  loadFindings();
+}
+
+async function loadFindings() {
+  const out = $("#fOut");
+  if (!out) return;
+  if (S.intel) {
+    renderFindings(S.intel);
+    renderNav();
+    return;
+  }
+  out.innerHTML = `<div class="empty"><span class="spin"></span>
+    Starting intelligence analysis…</div>`;
+  try {
+    const r = await post("intelligence/run", {
+      containers: S.containers,
+      owner: S.owner || "",
+      tz: S.tz || 0,
+    });
+    let seq = 0;
+    let lastMsg = "Running the rule set over every artifact…";
+    const finish = (j) => {
+      if (S.findingsTimer) clearInterval(S.findingsTimer);
+      S.findingsTimer = null;
+      if (j.status === "done" && j.result) {
+        S.intel = j.result;
+        renderFindings(S.intel);
+        renderNav();
+      } else {
+        out.innerHTML = `<div class="note bad"><b>Findings could not be produced</b>
+          ${esc(j.error || j.status)}</div>`;
+      }
+    };
+    const poll = async () => {
+      const j = await api(`job?id=${r.job_id}&since=${seq}`);
+      j.log.forEach(line => {
+        seq = line.seq;
+        if (line.message) lastMsg = line.message;
+      });
+      out.innerHTML = `<div class="empty"><span class="spin"></span>
+        ${esc(lastMsg)}</div>`;
+      if (["done", "failed", "cancelled"].includes(j.status)) {
+        finish(j);
+        return true;
+      }
+      return false;
+    };
+    if (!(await poll())) {
+      S.findingsTimer = setInterval(() => { poll(); }, 350);
+    }
+  } catch (e) {
+    out.innerHTML = `<div class="note bad"><b>Findings could not be produced</b>
+      ${esc(e.message)}</div>`;
+  }
+}
+
+function renderFindings(intel) {
+  const out = $("#fOut");
+  const f = intel.findings;
+  const sev = f.by_severity || {};
+  const order = ["critical", "high", "medium", "low", "info"];
+
+  let html = `<div class="sevbar">${order.filter(k => sev[k]).map(k => `
+    <div class="sevbox"><div class="n" style="color:${
+      k === "critical" ? "var(--danger)" : k === "high" ? "#e08b2f"
+      : k === "medium" ? "var(--accent)" : "var(--fg3)"}">${sev[k]}</div>
+      <div class="l">${esc(k)}</div></div>`).join("")}
+    <div class="sevbox"><div class="n">${num(f.artifacts_analysed)}</div>
+      <div class="l">artifacts</div></div>
+    <div class="sevbox"><div class="n">${f.rules_run}</div>
+      <div class="l">rules run</div></div>
+  </div>`;
+
+  if (!f.count) {
+    html += `<div class="note"><b>No rule produced a finding</b>
+      This is not a statement that nothing of interest is present — only that
+      the automated rules did not fire. Continue in the Analyse view.</div>`;
+  }
+  if (!f.artifacts_analysed) {
+    html += `<div class="note bad"><b>No decoded artifacts in selected container(s)</b>
+      Intelligence needs a completed extraction with decode. If extraction logs show
+      <code>unexpected: 'NoneType' object has no attribute 'strip'</code>, restart
+      ARGUS, re-run extraction (Comprehensive or Filesystem with USB debugging on),
+      then open <b>one</b> sealed container — not every failed attempt.</div>`;
+  }
+
+  const hs = intel.hashsets || {};
+  if (hs.performed || hs.known_bad_count || hs.known_good_count) {
+    const summary = hs.summary || {};
+    html += `<h2>Hash-set screening</h2>
+      <div class="grid" style="margin-bottom:12px">
+        <div class="card"><h3>Screened</h3>
+          <div class="stat" style="font-size:26px;font-family:var(--mono)">
+            ${num(summary.screened || 0)}</div></div>
+        <div class="card"><h3>Known-bad hits</h3>
+          <div class="stat" style="font-size:26px;font-family:var(--mono);color:var(--danger)">
+            ${num(hs.known_bad_count || 0)}</div></div>
+        <div class="card"><h3>Known-good suppressed</h3>
+          <div class="stat" style="font-size:26px;font-family:var(--mono)">
+            ${num(hs.known_good_count || 0)}</div></div>
+      </div>`;
+    if ((hs.known_bad || []).length) {
+      html += `<table><thead><tr><th>File</th><th>Set</th><th>SHA-256</th></tr></thead><tbody>
+        ${hs.known_bad.slice(0, 15).map(h => `<tr>
+          <td>${esc(h.filename || h.artifact_id || "—")}</td>
+          <td>${esc(h.set_name || "")}</td>
+          <td class="mono">${esc((h.sha256 || "").slice(0, 16))}…</td></tr>`).join("")}
+        </tbody></table>`;
+    }
+  }
+
+  if (!f.count && !(hs.known_bad_count || hs.performed)) {
+    out.innerHTML = html;
+    return;
+  }
+  if (!f.count) {
+    out.innerHTML = html;
+    return;
+  }
+
+  html += f.findings.map(x => `
+    <div class="finding ${esc(x.severity)}">
+      <div class="fhead">
+        <span class="sevtag ${esc(x.severity)}">${esc(x.severity.toUpperCase())}</span>
+        <h3>${esc(x.title)}</h3>
+        <span class="mono" style="color:var(--fg3)">conf ${x.confidence}</span>
+      </div>
+      <div class="detail">${esc(x.detail)}</div>
+      ${x.why_it_matters ? `<div class="why"><b>Why it matters:</b>
+        ${esc(x.why_it_matters)}</div>` : ""}
+      ${(x.evidence || []).length ? `<ul class="fev">${
+        x.evidence.slice(0, 4).map(v => `<li>${esc(String(v).slice(0, 200))}</li>`)
+        .join("")}</ul>` : ""}
+      ${(x.parties || []).length ? `<div class="taglist">${
+        x.parties.slice(0, 8).map(p => `<span class="pill">${esc(p)}</span>`)
+        .join("")}</div>` : ""}
+      <div class="fmeta">
+        <span>rule ${esc(x.rule_id)}</span>
+        <span>${(x.artifact_ids || []).length} artifact(s) cited</span>
+        ${x.first_seen_iso ? `<span>${esc(x.first_seen_iso.slice(0, 19))} →
+          ${esc((x.last_seen_iso || "").slice(0, 19))}</span>` : ""}
+        ${(x.artifact_ids || []).length ?
+          `<a href="#" data-ids="${esc((x.artifact_ids || []).slice(0,1).join(''))}"
+             class="openq" style="color:var(--accent)">open in analysis →</a>` : ""}
+      </div>
+      ${x.caveat ? `<div class="caveat"><b>Caveat:</b> ${esc(x.caveat)}</div>` : ""}
+    </div>`).join("");
+
+  // Entities
+  const ents = intel.entities || {};
+  const high = ents.high_value || [];
+  if (high.length) {
+    html += `<h2>High-value entities extracted from content</h2>
+      <p class="lede" style="margin-bottom:10px">Checksum-validated where the
+        format allows. A valid checksum proves the string is well-formed — not
+        that it belongs to the device owner or was ever used.</p>
+      <table><thead><tr><th>Type</th><th>Value</th><th>Seen</th>
+        <th>Validation</th><th>Applications</th></tr></thead><tbody>
+      ${high.slice(0, 30).map(h => `<tr>
+        <td>${esc(h.label)}</td>
+        <td class="mono">${esc(String(h.value).slice(0, 56))}</td>
+        <td>${h.count}</td>
+        <td>${h.validated ? '<span class="pill ok">checksum verified</span>'
+                          : '<span class="pill">format only</span>'}</td>
+        <td>${esc((h.apps || []).slice(0, 3).join(", "))}</td></tr>`).join("")}
+      </tbody></table>`;
+  }
+  if (ents.by_kind && Object.keys(ents.by_kind).length) {
+    html += `<div class="taglist" style="margin-top:10px">${
+      Object.entries(ents.by_kind).map(([k, v]) =>
+        `<span class="pill">${esc(k)} ${v}</span>`).join("")}</div>`;
+  }
+
+  // Correlation
+  const corr = intel.correlation || {};
+  if (corr.shared_party_count) {
+    html += `<h2>Cross-exhibit correlation</h2>
+      <div class="grid" style="margin-bottom:12px">
+        <div class="card"><h3>Shared parties</h3>
+          <div class="stat" style="font-size:26px;font-family:var(--mono)">
+            ${corr.shared_party_count}</div></div>
+        <div class="card"><h3>Byte-identical files</h3>
+          <div class="stat" style="font-size:26px;font-family:var(--mono)">
+            ${corr.shared_media_count || 0}</div></div>
+        <div class="card"><h3>Shared locations</h3>
+          <div class="stat" style="font-size:26px;font-family:var(--mono)">
+            ${corr.shared_location_count || 0}</div></div>
+      </div>
+      <table><thead><tr><th>Party</th><th>Exhibits</th><th>Artifacts</th>
+        <th>Deleted on</th></tr></thead><tbody>
+      ${(corr.shared_parties || []).slice(0, 20).map(p => `<tr>
+        <td><b>${esc(p.best_label)}</b></td>
+        <td>${esc(Object.keys(p.exhibits).join(", "))}</td>
+        <td>${num(Object.values(p.exhibits).reduce((a, b) => a + b, 0))}</td>
+        <td>${p.deleted_on.length
+              ? `<span class="pill warn">${esc(p.deleted_on.join(", "))}</span>`
+              : "—"}</td></tr>`).join("")}
+      </tbody></table>
+      <div class="note">${esc(corr.note || "")}</div>`;
+  }
+
+  // Communities
+  const comm = intel.communities || {};
+  if (comm.count) {
+    html += `<h2>Community structure</h2>
+      <div class="note ${comm.structure_is_meaningful ? "ok" : ""}">
+        <b>Modularity ${comm.modularity}</b>${esc(comm.interpretation)}</div>`;
+  }
+
+  // Conversations
+  const conv = intel.conversations || {};
+  if (conv.conversation_count) {
+    html += `<h2>Conversation threads</h2>
+      <div class="grid" style="margin-bottom:12px">
+        <div class="card"><h3>Threads</h3>
+          <div class="stat" style="font-size:26px;font-family:var(--mono)">
+            ${conv.conversation_count}</div></div>
+        <div class="card"><h3>With deleted content</h3>
+          <div class="stat" style="font-size:26px;font-family:var(--mono)">
+            ${conv.threads_with_deleted_content || 0}</div></div>
+      </div>`;
+    if ((conv.threads || []).length) {
+      html += `<table><thead><tr><th>Correspondent</th><th>Messages</th>
+        <th>Deleted</th><th>Last activity</th></tr></thead><tbody>
+        ${conv.threads.slice(0, 15).map(t => `<tr>
+          <td><b>${esc(t.label || t.correspondent || "—")}</b></td>
+          <td>${num(t.message_count)}</td>
+          <td>${t.deleted_count ? `<span class="pill warn">${t.deleted_count}</span>` : "—"}</td>
+          <td class="mono">${esc((t.last_message_at || "").slice(0, 19))}</td></tr>`).join("")}
+        </tbody></table>`;
+    }
+  }
+
+  // Attribution / fusion
+  const fusion = intel.fusion || {};
+  if (fusion.events) {
+    const by = fusion.by_attribution || {};
+    html += `<h2>Device attribution</h2>
+      <div class="grid" style="margin-bottom:12px">
+        <div class="card"><h3>Attributed</h3>
+          <div class="stat" style="font-size:26px;font-family:var(--mono)">
+            ${by.attributed || 0}</div></div>
+        <div class="card"><h3>Probable</h3>
+          <div class="stat" style="font-size:26px;font-family:var(--mono)">
+            ${by.probable || 0}</div></div>
+        <div class="card"><h3>Unknown</h3>
+          <div class="stat" style="font-size:26px;font-family:var(--mono)">
+            ${by.unknown || fusion.unknown || 0}</div></div>
+      </div>
+      <div class="note">${esc(fusion.note || fusion.coverage_note || "")}</div>`;
+  }
+
+  html += `<div class="actions">
+    <button class="btn primary" id="fToReport">Include these in a report →</button>
+    <button class="btn" id="fToAnalyse">Open the analysis view</button></div>`;
+
+  out.innerHTML = html;
+  if ($("#fToReport")) $("#fToReport").onclick = () => {
+    S.view = "report"; renderNav(); route(); };
+  if ($("#fToAnalyse")) $("#fToAnalyse").onclick = () => {
+    S.view = "analyse"; renderNav(); route(); };
+  out.querySelectorAll("a.openq").forEach(a => a.onclick = ev => {
+    ev.preventDefault();
+    const id = a.dataset.ids || "";
+    S.view = "analyse"; renderNav();
+    openAnalysis({ artifact: id });
+  });
+}
+
+/* ═══════════════════════ 6 · REPORT ═══════════════════════ */
+async function viewReport(m) {
+  await refreshCase();
+  const ex = S.caseOverview.extractions || [];
+  const caps = S.env.capabilities;
+  let savedOperator = "";
+  try { savedOperator = sessionStorage.getItem("argus_operator") || ""; } catch (_) {}
+  const defaultExaminer = savedOperator || S.caseOverview.investigator || "";
+  const fmt = (id, label, need) => {
+    const ok = !need || caps[need]?.available;
+    return `<label class="check" ${ok ? "" : 'style="opacity:.45"'}>
+      <input type="checkbox" class="fmt" value="${id}" ${
+        ok ? (id === "html" ? "checked" : "") : "disabled"}>
+      <span>${esc(label)}${ok ? "" :
+        `<small>Unavailable — ${esc(caps[need].install)}</small>`}</span></label>`;
+  };
+
+  m.innerHTML = `<div class="pane">
+    <h1>Report</h1>
+    <div class="lede">Every format leads with the integrity statement, before
+      any finding. Records recovered from deleted space are visually
+      distinguished throughout, so a reader can never mistake carved material
+      for something that was live on the handset.
+      <span class="mono" style="display:block;margin-top:6px;color:var(--fg3)">
+      Lab manual §6.8, Step 21</span></div>
+
+    <h2>Extractions to include</h2>
+    <div class="cards" id="rCards">${ex.map(x => `
+      <div class="card pick ${S.containers.includes(x.path) ? "sel" : ""}"
+           data-path="${esc(x.path)}">
+        <h3>${esc(x.exhibit_id)}</h3>
+        <dl class="kv"><dt>Device</dt><dd>${esc(x.device || "—")}</dd>
+          <dt>Artifacts</dt><dd>${num(x.artifacts)}</dd></dl></div>`).join("")}</div>
+
+    <h2>Scope</h2>
+    <div class="grid">
+      <div class="field"><label>Include</label>
+        <select id="rScope">
+          <option value="all">All artifacts</option>
+          <option value="filtered">Filtered by query…</option>
+        </select></div>
+      <div class="field" id="rQueryField" style="display:none">
+        <label>AQL filter</label>
+        <input id="rQuery" placeholder='category:Messages AND deleted:true'
+          spellcheck="false">
+        <span class="help">Same query language as the analysis view.</span></div>
+    </div>
+
+    <h2>Output formats</h2>
+    <div class="grid" style="grid-template-columns:repeat(auto-fill,minmax(230px,1fr));gap:2px">
+      ${fmt("html", "HTML — self-contained, prints cleanly", null)}
+      ${fmt("pdf", "PDF — paginated, court-ready", "pdf")}
+      ${fmt("xlsx", "Excel — one sheet per category", "xlsx")}
+      ${fmt("docx", "Word — editable narrative", "docx")}
+      ${fmt("xml", "XML — structured exchange", null)}
+      ${fmt("json", "JSON — full fidelity", null)}
+      ${fmt("csv", "CSV — flat artifact list", null)}
+    </div>
+
+    <h2>Report details</h2>
+    <div class="grid">
+      <div class="field"><label>Title</label>
+        <input id="rTitle" value="Mobile Device Forensic Examination Report"></div>
+      <div class="field"><label>Examiner</label>
+        <input id="rExaminer" value="${esc(defaultExaminer)}"></div>
+      <div class="field"><label>Organisation</label>
+        <input id="rOrg" value="${esc(S.caseOverview.organisation || "")}"></div>
+      <div class="field"><label>Reference</label>
+        <input id="rRef" placeholder="e.g. FIR 114/2026"></div>
+    </div>
+    <div class="field" style="margin-top:14px"><label>Conclusion</label>
+      <textarea id="rConc" placeholder="Your findings and conclusion"></textarea></div>
+    <div style="margin-top:12px">
+      <label class="check"><input type="checkbox" id="rDeleted" checked>
+        <span>Include records recovered from deleted space</span></label>
+      <label class="check"><input type="checkbox" id="rGraph" checked>
+        <span>Include communication analysis</span></label>
+      <label class="check"><input type="checkbox" id="rIntel" checked>
+        <span>Include investigative findings
+          <small>Ranked leads with citations and caveats, placed before the
+          artifact tables.</small></span></label>
+      <label class="check"><input type="checkbox" id="rLog">
+        <span>Append the extraction log</span></label>
+      <label class="check"><input type="checkbox" id="rAudit">
+        <span>Append the chain-of-custody log</span></label>
+    </div>
+
+    <div class="field" style="margin-top:14px"><label>Save to</label>
+      <div class="inline"><input id="rOut" spellcheck="false"
+        value="${esc(S.env.workspace + (S.env.workspace.includes("\\") ? "\\reports" : "/reports"))}">
+        <button class="btn" id="rBrowse">Browse…</button></div></div>
+
+    <h2>Court readiness</h2>
+    <div class="lede" style="margin-bottom:12px">Independent integrity artifacts
+      that can be verified without ARGUS — validation against known-answer tests
+      and a self-contained evidence certificate.</div>
+    <div class="actions" style="margin-top:0">
+      <button class="btn" id="rValidate">Run validation harness</button>
+      <button class="btn" id="rCert">Issue evidence certificate</button>
+      <button class="btn primary" id="rBundle">Generate court bundle</button>
+    </div>
+    <div id="rCourt"></div>
+
+    <div class="actions">
+      <button class="btn primary" id="rGo">Generate report</button>
+      <span id="rMsg" class="mono"></span></div>
+    <div id="rRun"></div>
+  </div>`;
+
+  m.querySelectorAll("#rCards .card").forEach(card => {
+    card.onclick = () => {
+      const p = card.dataset.path;
+      S.containers = S.containers.includes(p)
+        ? S.containers.filter(x => x !== p) : [...S.containers, p];
+      m.querySelectorAll("#rCards .card").forEach(c =>
+        c.classList.toggle("sel", S.containers.includes(c.dataset.path)));
+    };
+  });
+  $("#rScope").onchange = e =>
+    $("#rQueryField").style.display = e.target.value === "filtered" ? "" : "none";
+  $("#rBrowse").onclick = () => openBrowser({
+    title: "Choose where to save the report", start: $("#rOut").value,
+    onPick: p => $("#rOut").value = p });
+
+  $("#rValidate").onclick = async () => {
+    $("#rCourt").innerHTML = `<div class="note"><span class="spin"></span>
+      Running validation harness…</div>`;
+    try {
+      const r = await post("validate", { out_dir: $("#rOut").value.trim() });
+      watchJob(r.job_id, "rCourt", j => {
+        if (j.status === "done") {
+          const d = j.result || {};
+          const s = d.summary || {};
+          $("#rCourt").innerHTML = `<div class="note ok"><b>Validation complete</b>
+            ${s.tests_passed || 0}/${s.tests_run || 0} tests · recall ${
+            s.overall_recall || "—"} · precision ${s.overall_precision || "—"}
+            ${d.report_path ? `<div class="mono" style="margin-top:6px">${
+              esc(d.report_path)}</div>` : ""}</div>`;
+        }
+      });
+    } catch (e) {
+      $("#rCourt").innerHTML = `<div class="note bad">${esc(e.message)}</div>`;
+    }
+  };
+  $("#rCert").onclick = async () => {
+    if (!S.containers.length) {
+      toast("Select at least one extraction.", { type: "warn" });
+      return;
+    }
+    $("#rCourt").innerHTML = `<div class="note"><span class="spin"></span>
+      Building evidence certificate…</div>`;
+    try {
+      const r = await post("certificate", {
+        containers: S.containers,
+        out_dir: $("#rOut").value.trim(),
+        examiner: $("#rExaminer").value.trim(),
+        seal: true });
+      watchJob(r.job_id, "rCourt", j => {
+        if (j.status === "done") {
+          const d = j.result || {};
+          $("#rCourt").innerHTML = `<div class="note ok"><b>Certificate issued</b>
+            ${d.path ? `<div class="mono" style="margin-top:6px">${
+              esc(d.path)}</div>` : ""}
+            ${d.digest ? `<div style="margin-top:6px">Digest: <code>${
+              esc(String(d.digest).slice(0, 32))}…</code></div>` : ""}
+            ${d.all_verified === false ? `<div class="note bad" style="margin-top:8px">
+              Verification failures were recorded on the certificate.</div>` : ""}
+          </div>`;
+        }
+      });
+    } catch (e) {
+      $("#rCourt").innerHTML = `<div class="note bad">${esc(e.message)}</div>`;
+    }
+  };
+  $("#rBundle").onclick = async () => {
+    if (!S.containers.length) {
+      toast("Select at least one extraction.", { type: "warn" });
+      return;
+    }
+    $("#rCourt").innerHTML = `<div class="note"><span class="spin"></span>
+      Building court disclosure bundle…</div>`;
+    try {
+      const r = await post("bundle", {
+        containers: S.containers,
+        out_dir: $("#rOut").value.trim(),
+        examiner: $("#rExaminer").value.trim(),
+        organisation: $("#rOrg").value.trim(),
+        reference: $("#rRef").value.trim(),
+        conclusion: $("#rConc").value.trim(),
+        owner: S.owner });
+      watchJob(r.job_id, "rCourt", j => {
+        if (j.status === "done") {
+          const d = j.result || {};
+          $("#rCourt").innerHTML = `<div class="note ok"><b>Court bundle ready</b>
+            <div class="mono" style="margin-top:6px">${esc(d.bundle_dir || "")}</div>
+            <div style="margin-top:6px">${d.file_count || 0} file(s) · verified: ${
+              d.all_verified ? "yes" : "with warnings"}</div>
+            ${d.manifest ? `<div class="mono" style="margin-top:4px">${esc(d.manifest)}</div>` : ""}
+          </div>`;
+        }
+      });
+    } catch (e) {
+      $("#rCourt").innerHTML = `<div class="note bad">${esc(e.message)}</div>`;
+    }
+  };
+
+  $("#rGo").onclick = async () => {
+    const formats = [...m.querySelectorAll(".fmt:checked")].map(c => c.value);
+    $("#rMsg").textContent = "";
+    if (!S.containers.length) { $("#rMsg").innerHTML =
+      `<span style="color:var(--danger)">Select at least one extraction.</span>`; return; }
+    if (!formats.length) { $("#rMsg").innerHTML =
+      `<span style="color:var(--danger)">Select at least one format.</span>`; return; }
+    $("#rGo").disabled = true;
+    try {
+      const r = await post("report", {
+        containers: S.containers, out_dir: $("#rOut").value.trim(),
+        formats, scope: $("#rScope").value, query: $("#rQuery")?.value || "",
+        title: $("#rTitle").value, examiner: $("#rExaminer").value,
+        organisation: $("#rOrg").value, reference: $("#rRef").value,
+        conclusion: $("#rConc").value,
+        include_deleted: $("#rDeleted").checked,
+        include_graph: $("#rGraph").checked,
+        include_intelligence: $("#rIntel").checked,
+        owner: S.owner,
+        include_log: $("#rLog").checked, include_audit: $("#rAudit").checked });
+      watchJob(r.job_id, "rRun", () => { $("#rGo").disabled = false; });
+    } catch (e) {
+      $("#rMsg").innerHTML = `<span style="color:var(--danger)">${esc(e.message)}</span>`;
+      $("#rGo").disabled = false;
+    }
+  };
+  setStat("Configure and generate the forensic report");
+}
+
+/* ═══════════════════════ extraction save / export ═══════════════════════ */
+function containerZipName(containerPath) {
+  const base = (containerPath || "").split(/[\\/]/).pop() || "extraction";
+  return base.endsWith(".afc") ? `${base}.zip` : `${base}.afc.zip`;
+}
+
+async function openContainerFolder(containerPath) {
+  if (!containerPath) return;
+  try {
+    await post("shell/open", { path: containerPath });
+  } catch (e) { toast(e.message, { type: "bad" }); }
+}
+
+function saveContainerZip(containerPath) {
+  if (!containerPath) return;
+  const zipName = containerZipName(containerPath);
+  const parent = (containerPath || "").replace(/[\\/][^\\/]+$/, "") || S.env?.workspace || "";
+  openBrowser({
+    title: "Save extraction as ZIP — choose folder",
+    start: parent,
+    onPick: async (dir) => {
+      const sep = dir.includes("\\") ? "\\" : "/";
+      const dest = /\.zip$/i.test(dir)
+        ? dir : `${dir.replace(/[\\/]$/, "")}${sep}${zipName}`;
+      try {
+        toast("Creating ZIP archive…", { type: "info", duration: 12000 });
+        const r = await post("container/export", { container: containerPath, dest });
+        toast(`Saved ${human(r.size)} → ${r.path}`, { type: "ok", duration: 10000 });
+      } catch (e) { toast(e.message, { type: "bad" }); }
+    },
+  });
+}
+
+/* ═══════════════════════ folder browser ═══════════════════════ */
+let fsState = { path: "", onPick: null, allowFiles: false };
+
+function openBrowser({ title, start, onPick, allowFiles }) {
+  fsState = { path: start || "", onPick, allowFiles: !!allowFiles };
+  $("#modalTitle").textContent = title || "Choose a folder";
+  $("#modal").classList.add("open");
+  loadDir(start || "");
+}
+function closeModal() { $("#modal").classList.remove("open"); }
+$("#modal").onclick = e => { if (e.target.id === "modal") closeModal(); };
+$("#fsGo").onclick = () => loadDir($("#fsPath").value);
+$("#fsPath").onkeydown = e => { if (e.key === "Enter") loadDir($("#fsPath").value); };
+$("#fsPick").onclick = () => {
+  if (fsState.onPick) fsState.onPick(fsState.path);
+  closeModal();
+};
+
+async function loadDir(path) {
+  const body = $("#fsBody");
+  body.innerHTML = `<div class="empty"><span class="spin"></span></div>`;
+  try {
+    const r = await api("browse?path=" + encodeURIComponent(path || ""));
+    fsState.path = r.path;
+    $("#fsPath").value = r.path;
+    $("#fsSel").textContent = r.path || "Choose a location";
+    $("#fsUp").onclick = () => loadDir(r.parent || "");
+    $("#fsUp").disabled = !r.parent;
+
+    body.innerHTML = "";
+    if (r.is_root_list || !r.path) {
+      r.roots.forEach(root => {
+        const row = el("div", "fsrow dir");
+        row.innerHTML = `<span class="ic">▸</span>
+          <span class="nm">${esc(root)}</span>`;
+        row.onclick = () => loadDir(root);
+        body.appendChild(row);
+      });
+      return;
+    }
+    r.dirs.forEach(d => {
+      const row = el("div", "fsrow dir " + (d.kind || ""));
+      const icon = d.kind === "case" ? "▣" : d.kind === "container" ? "▤"
+                 : d.kind === "ios-backup" ? "▤" : "▸";
+      row.innerHTML = `<span class="ic">${icon}</span>
+        <span class="nm">${esc(d.name)}</span>
+        ${d.kind ? `<span class="pill">${esc(d.kind)}</span>` : ""}`;
+      row.onclick = () => loadDir(d.path);
+      if (fsState.allowFiles && d.kind) {
+        row.ondblclick = () => { fsState.onPick(d.path); closeModal(); };
+      }
+      body.appendChild(row);
+    });
+    if (fsState.allowFiles) {
+      r.files.forEach(f => {
+        const icon = f.kind === "backup" ? "▤"
+                   : f.kind === "msab-xry" ? "◆"
+                   : f.kind === "cellebrite" ? "◆"
+                   : f.kind === "container" ? "▤"
+                   : f.kind === "archive" ? "▣" : "·";
+        const row = el("div", "fsrow");
+        row.innerHTML = `<span class="ic">${icon}</span>
+          <span class="nm">${esc(f.name)}</span>
+          ${f.kind && f.kind !== "file"
+            ? `<span class="pill">${esc(f.kind)}</span>` : ""}
+          <span class="sz">${human(f.size)}</span>`;
+        row.onclick = () => { fsState.onPick(f.path); closeModal(); };
+        body.appendChild(row);
+      });
+    }
+    if (!r.dirs.length && !(fsState.allowFiles && r.files.length)) {
+      body.innerHTML = `<div class="empty">This folder is empty.</div>`;
+    }
+  } catch (e) {
+    body.innerHTML = `<div class="pane"><div class="note bad">${
+      esc(e.message)}</div></div>`;
+  }
+}
+
+document.addEventListener("keydown", e => {
+  if (e.key === "Escape") closeModal();
+});
+</script>
+</body>
+</html>

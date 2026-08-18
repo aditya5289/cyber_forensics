@@ -1,0 +1,3448 @@
+<!DOCTYPE html>
+<!--
+  ARGUS Analyst — the examination surface.
+
+  Single file, no build step, no CDN. A forensic workstation is frequently
+  air-gapped, and a UI that needs to reach the network to render is a UI that
+  does not work where it matters most.
+
+  Three rules govern everything below:
+    1. Never show a number without saying what it counts. Facet counts are
+       computed server-side over the whole result set, not the page in hand.
+    2. Never present a recovered record as though it were an allocated one.
+       Provenance flags travel with the row, not just the detail pane.
+    3. Never lose the examiner's place. Navigation is keyboard-first and the
+       current view is restorable.
+-->
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>ARGUS Horizon — Analyst</title>
+<style>
+  :root{
+    --bg:#0e1116; --panel:#151a21; --panel-2:#1b222b; --line:#252d38;
+    --ink:#dfe6ef; --ink-dim:#93a1b3; --ink-faint:#6b7889;
+    --accent:#4c9aff; --accent-dim:#2c5c99;
+    --warn:#e2b33c; --danger:#e5534b; --ok:#3fb950; --violet:#a371f7;
+    --mono:"SF Mono",Menlo,Consolas,"Liberation Mono",monospace;
+    --sans:-apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,sans-serif;
+  }
+  *{box-sizing:border-box}
+  html,body{height:100%}
+  body{margin:0;background:var(--bg);color:var(--ink);font:13px/1.5 var(--sans);
+       overflow:hidden}
+  a{color:var(--accent);text-decoration:none}
+  button{font:inherit;color:inherit;background:none;border:0;cursor:pointer}
+  input,select,textarea{font:inherit;color:var(--ink);background:var(--panel-2);
+    border:1px solid var(--line);border-radius:5px;padding:6px 9px}
+  input:focus,select:focus{outline:2px solid var(--accent-dim);outline-offset:-1px}
+  ::-webkit-scrollbar{width:10px;height:10px}
+  ::-webkit-scrollbar-thumb{background:#2a323d;border-radius:5px}
+  ::-webkit-scrollbar-track{background:transparent}
+
+  /* ---------------------------------------------------------------- shell */
+  #app{display:grid;height:100vh;
+       grid-template-columns:228px 1fr;
+       grid-template-rows:48px 1fr 26px;
+       grid-template-areas:"brand top" "rail main" "rail status"}
+  #brand{grid-area:brand;display:flex;flex-direction:column;justify-content:center;
+         gap:1px;padding:0 14px;border-bottom:1px solid var(--line);
+         border-right:1px solid var(--line);background:linear-gradient(180deg,#151a21,#12171e)}
+  #brand b{letter-spacing:.16em;font-size:12px}
+  #brand .prod{color:var(--accent);font-size:9px;letter-spacing:.18em;text-transform:uppercase}
+  #brand span{color:var(--ink-faint);font-size:10px}
+  #top{grid-area:top;display:flex;align-items:center;gap:10px;padding:0 12px;
+       border-bottom:1px solid var(--line);background:var(--panel)}
+  #rail{grid-area:rail;background:var(--panel);border-right:1px solid var(--line);
+        overflow-y:auto;padding:8px 0}
+  #main{grid-area:main;overflow:hidden;display:flex;flex-direction:column}
+  #status{grid-area:status;background:var(--panel);border-top:1px solid var(--line);
+          display:flex;align-items:center;gap:16px;padding:0 12px;
+          font:11px/1 var(--mono);color:var(--ink-faint)}
+
+  .navgroup{padding:9px 14px 4px;font-size:10px;letter-spacing:.1em;
+            text-transform:uppercase;color:var(--ink-faint)}
+  .nav{display:flex;align-items:center;gap:9px;width:100%;padding:6px 14px;
+       color:var(--ink-dim);border-left:2px solid transparent}
+  .nav:hover{background:var(--panel-2);color:var(--ink)}
+  .nav.on{background:var(--panel-2);color:var(--ink);border-left-color:var(--accent)}
+  .nav .k{margin-left:auto;font:10px var(--mono);color:var(--ink-faint)}
+  .nav .n{margin-left:auto;font:10px var(--mono);color:var(--ink-faint)}
+
+  #q{flex:1;font-family:var(--mono);font-size:12px}
+  .btn{border:1px solid var(--line);background:var(--panel-2);border-radius:5px;
+       padding:6px 11px;color:var(--ink-dim)}
+  .btn:hover{color:var(--ink);border-color:var(--accent-dim)}
+  .btn.primary{background:var(--accent-dim);border-color:var(--accent);color:#fff}
+
+  /* --------------------------------------------------------------- layout */
+  .split{display:grid;grid-template-columns:212px 1fr 0;height:100%;
+         overflow:hidden;transition:grid-template-columns .12s}
+  .split.detail{grid-template-columns:212px 1fr 400px}
+  .split.nofacet{grid-template-columns:0 1fr 400px}
+  #facets{border-right:1px solid var(--line);overflow-y:auto;background:var(--panel)}
+  #list{overflow-y:auto;position:relative}
+  #detail{border-left:1px solid var(--line);overflow-y:auto;background:var(--panel)}
+
+  .facetgroup{border-bottom:1px solid var(--line);padding:9px 12px}
+  .facetgroup h4{margin:0 0 6px;font-size:10px;letter-spacing:.09em;
+                 text-transform:uppercase;color:var(--ink-faint)}
+  .facet{display:flex;align-items:center;gap:7px;width:100%;padding:3px 0;
+         color:var(--ink-dim);font-size:12px}
+  .facet:hover{color:var(--ink)}
+  .facet.on{color:var(--accent)}
+  .facet .c{margin-left:auto;font:10px var(--mono);color:var(--ink-faint)}
+  .facet .bar{position:absolute;left:0;height:2px;background:var(--accent-dim)}
+
+  /* ---------------------------------------------------------------- table */
+  table{width:100%;border-collapse:collapse}
+  thead th{position:sticky;top:0;z-index:2;background:var(--panel);
+    border-bottom:1px solid var(--line);text-align:left;padding:7px 10px;
+    font-size:10px;letter-spacing:.08em;text-transform:uppercase;
+    color:var(--ink-faint);white-space:nowrap}
+  tbody td{padding:7px 10px;border-bottom:1px solid #1c232c;vertical-align:top}
+  tbody tr{cursor:pointer}
+  tbody tr:hover{background:var(--panel-2)}
+  tbody tr.sel{background:#1d2a3d;box-shadow:inset 2px 0 0 var(--accent)}
+  .ts{font:11px var(--mono);color:var(--ink-dim);white-space:nowrap}
+  .body{max-width:640px}
+  .muted{color:var(--ink-faint)}
+
+  .pill{display:inline-block;padding:1px 6px;border-radius:9px;font-size:10px;
+        border:1px solid var(--line);color:var(--ink-dim);white-space:nowrap}
+  .pill.del{border-color:#5a2f2c;background:#2a1a19;color:#f0918a}
+  .pill.carve{border-color:#5c4a22;background:#2a2417;color:var(--warn)}
+  .pill.part{border-color:#4a3a5c;background:#241a2a;color:var(--violet)}
+  .pill.enc{border-color:#2f4a5a;background:#182530;color:#7fc7e8}
+  .pill.warnflag{border-color:#5c4a22;color:var(--warn)}
+
+  .conf{display:inline-block;width:34px;height:4px;border-radius:2px;
+        background:#2a323d;position:relative;vertical-align:middle}
+  .conf i{position:absolute;left:0;top:0;bottom:0;border-radius:2px;
+          background:var(--ok)}
+  .conf.low i{background:var(--danger)} .conf.mid i{background:var(--warn)}
+
+  /* ------------------------------------------------------------- dashboard */
+  .grid{display:grid;gap:12px;padding:14px;
+        grid-template-columns:repeat(auto-fill,minmax(260px,1fr));
+        overflow-y:auto;height:100%;align-content:start}
+  .card{background:var(--panel);border:1px solid var(--line);border-radius:8px;
+        padding:13px}
+  .card h3{margin:0 0 9px;font-size:11px;letter-spacing:.09em;
+           text-transform:uppercase;color:var(--ink-faint)}
+  .card.wide{grid-column:1/-1}
+  .card.span2{grid-column:span 2}
+  @media(max-width:980px){.card.span2{grid-column:1/-1}}
+  .big{font:600 26px/1.1 var(--sans)}
+  .hbar{display:flex;flex-direction:column;gap:7px}
+  .hbar .hrow{display:grid;grid-template-columns:minmax(72px,28%) 1fr 44px;gap:8px;
+              align-items:center;font-size:11px;cursor:pointer}
+  .hbar .hrow:hover .hfill{filter:brightness(1.15)}
+  .hbar .hlbl{overflow:hidden;text-overflow:ellipsis;white-space:nowrap;color:var(--ink-dim)}
+  .hbar .htrack{height:8px;background:#1c232c;border-radius:4px;overflow:hidden}
+  .hbar .hfill{height:100%;border-radius:4px;background:var(--accent);min-width:2px}
+  .hbar .hn{font:11px var(--mono);color:var(--ink-faint);text-align:right}
+  .donut{display:flex;gap:14px;align-items:center}
+  .donut canvas{flex:0 0 auto}
+  .donut .leg{flex:1;min-width:0}
+  .donut .leg .kv{cursor:pointer}
+  .heat24{display:grid;grid-template-columns:repeat(24,1fr);gap:2px;height:32px;margin:6px 0 2px}
+  .heat24 i{display:block;height:100%;border-radius:2px}
+  .heatlbl{display:flex;justify-content:space-between;font:9px var(--mono);color:var(--ink-faint)}
+  .netmini{width:100%;height:260px;display:block;background:#0a1018;border-radius:6px;
+           border:1px solid var(--line);cursor:pointer}
+  .spark{display:flex;align-items:flex-end;gap:1px;height:56px}
+  .spark b{flex:1;min-width:2px;background:var(--accent-dim);border-radius:1px 1px 0 0}
+  .mixbar{display:flex;height:12px;border-radius:6px;overflow:hidden;background:#1c232c;margin:8px 0}
+  .sect{grid-column:1/-1;font:11px var(--sans);letter-spacing:.14em;text-transform:uppercase;
+        color:var(--ink-faint);padding:10px 2px 0;border-top:1px solid var(--line);margin-top:4px}
+  .dashmap,.stackcv,.heathm{width:100%;display:block;border-radius:8px;background:#070b12;
+        border:1px solid var(--line)}
+  .dashmap{height:240px;cursor:pointer}
+  .stackcv{height:150px}
+  .heathm{height:168px}
+  .kpirow{display:flex;gap:16px;flex-wrap:wrap;margin-bottom:8px}
+  .kpirow .k{min-width:88px}
+  .kpirow .k .muted{font-size:10px;letter-spacing:.06em;text-transform:uppercase}
+  .legend-dots{display:flex;gap:10px;flex-wrap:wrap;margin-top:8px;font-size:11px;color:var(--ink-dim)}
+  .legend-dots i{display:inline-block;width:8px;height:8px;border-radius:50%;margin-right:5px}
+  .casebanner{display:grid;grid-template-columns:1.4fr .8fr .8fr;gap:16px}
+  @media(max-width:980px){.casebanner{grid-template-columns:1fr}}
+  .casebanner .dev{font:600 20px/1.2 var(--sans)}
+  /* command center — god-level analysis dashboard */
+  .cmd-hero{grid-column:1/-1;background:linear-gradient(135deg,#121820 0%,#151f2e 48%,#1a1528 100%);
+    border:1px solid var(--line);border-radius:12px;padding:18px 20px;
+    display:grid;grid-template-columns:1.5fr 1fr auto;gap:18px;align-items:center}
+  @media(max-width:1100px){.cmd-hero{grid-template-columns:1fr}}
+  .cmd-hero .exh{font:700 28px/1.1 var(--sans);letter-spacing:.02em}
+  .cmd-hero .sub{color:var(--ink-dim);font-size:13px;margin-top:6px}
+  .cmd-badges{display:flex;gap:8px;flex-wrap:wrap;margin-top:10px}
+  .cmd-badge{font:10px var(--mono);letter-spacing:.06em;text-transform:uppercase;
+    padding:4px 9px;border-radius:999px;border:1px solid var(--line);color:var(--ink-dim)}
+  .cmd-badge.ok{border-color:#2d6a3d;color:var(--ok);background:rgba(63,185,80,.08)}
+  .cmd-badge.bad{border-color:#6a2d2d;color:var(--danger);background:rgba(229,83,75,.08)}
+  .cmd-badge.warn{border-color:#5c4a22;color:var(--warn);background:rgba(226,179,60,.08)}
+  .cmd-score{text-align:center;min-width:108px}
+  .score-ring{width:92px;height:92px;border-radius:50%;display:grid;place-items:center;
+    margin:0 auto 6px;font:700 22px/1 var(--sans);
+    background:conic-gradient(var(--accent) calc(var(--pct) * 1%), #1c232c 0);
+    position:relative}
+  .score-ring::after{content:"";position:absolute;inset:10px;border-radius:50%;background:var(--panel)}
+  .score-ring b{position:relative;z-index:1}
+  .cmd-alerts{grid-column:1/-1;display:flex;flex-direction:column;gap:8px}
+  .cmd-alert{display:flex;gap:12px;align-items:flex-start;padding:10px 14px;border-radius:8px;
+    border:1px solid var(--line);background:var(--panel-2);cursor:pointer}
+  .cmd-alert:hover{border-color:var(--accent-dim)}
+  .cmd-alert.critical{border-color:#6a2d2d;background:rgba(229,83,75,.07)}
+  .cmd-alert.high{border-color:#5a3030}
+  .cmd-alert.warn{border-color:#5c4a22}
+  .cmd-alert h5{margin:0 0 2px;font-size:12.5px}
+  .cmd-alert p{margin:0;font-size:11.5px;color:var(--ink-dim)}
+  .kpi-grid{grid-column:1/-1;display:grid;gap:10px;
+    grid-template-columns:repeat(auto-fill,minmax(140px,1fr))}
+  .kpi{background:var(--panel);border:1px solid var(--line);border-radius:8px;padding:12px;
+    cursor:pointer;transition:border-color .12s,transform .12s}
+  .kpi:hover{border-color:var(--accent-dim);transform:translateY(-1px)}
+  .kpi .n{font:600 22px/1 var(--sans)}
+  .kpi .l{font-size:10px;letter-spacing:.08em;text-transform:uppercase;color:var(--ink-faint);
+    margin-top:6px}
+  .kpi .s{font-size:10px;color:var(--ink-dim);margin-top:4px}
+  .quick-grid{grid-column:1/-1;display:grid;gap:8px;
+    grid-template-columns:repeat(auto-fill,minmax(148px,1fr))}
+  .quick{padding:10px 12px;border-radius:8px;border:1px solid var(--line);background:var(--panel);
+    text-align:left;color:var(--ink-dim);font-size:12px}
+  .quick:hover{border-color:var(--accent);color:var(--ink)}
+  .quick b{display:block;color:var(--ink);font-size:12.5px;margin-bottom:3px}
+  .feed{max-height:320px;overflow:auto}
+  .feed .row{display:grid;grid-template-columns:118px 1fr 72px;gap:10px;padding:8px 0;
+    border-bottom:1px solid #1c232c;cursor:pointer;font-size:12px}
+  .feed .row:hover{color:var(--accent)}
+  .feed .row .ts{font:10px var(--mono);color:var(--ink-faint)}
+  .feed .row .sum{overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+  .parser-row{display:flex;justify-content:space-between;gap:10px;padding:6px 0;
+    border-bottom:1px solid #1c232c;font-size:12px}
+  .temp-insight{display:grid;grid-template-columns:repeat(auto-fill,minmax(160px,1fr));gap:10px}
+  .temp-insight .box{background:#0c1219;border:1px solid var(--line);border-radius:8px;padding:10px}
+  .temp-insight .box .n{font:600 18px/1 var(--sans)}
+  .temp-insight .box .l{font-size:10px;color:var(--ink-faint);margin-top:4px}
+  .hexview{font:11px/1.45 var(--mono);background:#070b12;border:1px solid var(--line);
+           border-radius:6px;padding:10px;overflow:auto;max-height:280px;white-space:pre}
+  .hexview .off{color:#6b7889}
+  .hexview .hx{color:#4c9aff}
+  .hexview .as{color:#3fb950}
+  .clockcv{width:100%;height:280px;display:block;background:#070b12;border-radius:8px;
+           border:1px solid var(--line)}
+  .srctree{font-size:12px}
+  .srctree .row{display:grid;grid-template-columns:1fr 70px;gap:8px;padding:5px 0;
+                border-bottom:1px solid #1c232c;cursor:pointer}
+  .srctree .row:hover{color:var(--accent)}
+  .tz{font:11px var(--mono);max-width:150px}
+  .kv{display:flex;justify-content:space-between;gap:10px;padding:3px 0;
+      border-bottom:1px solid #1c232c;font-size:12px}
+  .kv:last-child{border:0}
+  .kv b{font-weight:500;color:var(--ink-dim)}
+
+  .finding{border-left:2px solid var(--line);padding:7px 0 7px 10px;
+           margin-bottom:9px}
+  .finding.critical{border-left-color:#ff4d4d;background:rgba(229,83,75,.06)}
+  .finding.high{border-left-color:var(--danger)}
+  .finding.medium{border-left-color:var(--warn)}
+  .finding.low{border-left-color:var(--accent-dim)}
+  .finding h5{margin:0 0 3px;font-size:12.5px;font-weight:600}
+  .finding p{margin:0 0 4px;color:var(--ink-dim);font-size:12px}
+  .finding .why{color:var(--ink-faint);font-size:11px;font-style:italic}
+  .finding .caveat{color:var(--warn);font-size:11px}
+
+  /* -------------------------------------------------------------- timeline */
+  #scrub{height:56px;border-bottom:1px solid var(--line);background:var(--panel);
+         position:relative;cursor:crosshair;flex:0 0 auto}
+  #scrub canvas{display:block;width:100%;height:100%}
+  #scrub .sel{position:absolute;top:0;bottom:0;background:rgba(76,154,255,.16);
+              border-left:1px solid var(--accent);border-right:1px solid var(--accent)}
+  #scrub .lbl{position:absolute;bottom:2px;left:6px;font:10px var(--mono);
+              color:var(--ink-faint);pointer-events:none}
+
+  /* --------------------------------------------------------------- gallery */
+  .tiles{display:grid;gap:9px;padding:12px;overflow-y:auto;height:100%;
+         grid-template-columns:repeat(auto-fill,minmax(132px,1fr));align-content:start}
+  .tile{background:var(--panel);border:1px solid var(--line);border-radius:6px;
+        overflow:hidden;cursor:pointer}
+  .tile:hover{border-color:var(--accent-dim)}
+  .tile img{width:100%;height:118px;object-fit:cover;display:block;background:#0a0d11}
+  .tile .cap{padding:5px 7px;font-size:10px;color:var(--ink-faint);
+             white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+
+  /* ------------------------------------------------------------ conversation */
+  .turns{padding:14px;overflow-y:auto;height:100%}
+  .turn{max-width:62%;margin-bottom:9px;padding:8px 11px;border-radius:11px;
+        background:var(--panel-2);border:1px solid var(--line)}
+  .turn.out{margin-left:auto;background:#1d3049;border-color:#2c5c99}
+  .turn .meta{font:10px var(--mono);color:var(--ink-faint);margin-top:4px}
+
+  /* ----------------------------------------------------------------- detail */
+  .dsec{border-bottom:1px solid var(--line);padding:12px}
+  .dsec h4{margin:0 0 8px;font-size:10px;letter-spacing:.09em;
+           text-transform:uppercase;color:var(--ink-faint)}
+  .drow{display:grid;grid-template-columns:104px 1fr;gap:8px;padding:2px 0;
+        font-size:12px}
+  .drow b{font-weight:400;color:var(--ink-faint)}
+  .drow span{word-break:break-word}
+  .mono{font-family:var(--mono);font-size:11px}
+
+  .empty{display:flex;flex-direction:column;align-items:center;
+         justify-content:center;height:100%;color:var(--ink-faint);gap:8px;
+         text-align:center;padding:30px}
+  .spin{width:15px;height:15px;border:2px solid var(--line);
+        border-top-color:var(--accent);border-radius:50%;
+        animation:sp .7s linear infinite;display:inline-block}
+  @keyframes sp{to{transform:rotate(360deg)}}
+
+  kbd{font:10px var(--mono);background:var(--panel-2);border:1px solid var(--line);
+      border-bottom-width:2px;border-radius:3px;padding:1px 4px;color:var(--ink-dim)}
+  #help{position:fixed;inset:0;background:rgba(8,10,14,.82);z-index:50;
+        display:none;align-items:center;justify-content:center}
+  #help.show{display:flex}
+  #help .box{background:var(--panel);border:1px solid var(--line);border-radius:9px;
+             padding:20px 24px;max-width:560px;width:100%}
+  #help .box h3{margin:0 0 12px;font-size:13px}
+  #help td{padding:3px 10px 3px 0;font-size:12px;color:var(--ink-dim)}
+
+  /* ---------------------------------------------------------- visualisation */
+  .viz{padding:14px;overflow-y:auto;height:100%}
+  .vizgrid{display:grid;gap:14px;grid-template-columns:repeat(auto-fill,minmax(300px,1fr))}
+  .barchart{display:flex;align-items:flex-end;gap:3px;height:120px;padding:8px 0}
+  .barchart .bar{flex:1;min-width:4px;background:var(--accent-dim);border-radius:2px 2px 0 0;
+                  position:relative;cursor:pointer}
+  .barchart .bar:hover{background:var(--accent)}
+  .barchart .bar span{position:absolute;bottom:-16px;left:50%;transform:translateX(-50%);
+                        font:9px var(--mono);color:var(--ink-faint);white-space:nowrap}
+  #mapCanvas{width:100%;height:100%;display:block;background:#0a1018;cursor:crosshair}
+  .mapwrap{height:100%;position:relative;min-height:420px}
+  .maplegend{position:absolute;left:12px;bottom:12px;background:rgba(21,26,33,.92);
+             border:1px solid var(--line);border-radius:6px;padding:8px 10px;font-size:11px}
+  .graphbar{display:flex;gap:8px;align-items:center;padding:8px 12px;border-bottom:1px solid var(--line);
+            background:var(--panel);flex-wrap:wrap}
+  .lanechart{position:relative;height:180px;border:1px solid var(--line);border-radius:6px;
+             background:var(--panel);margin:10px 0;overflow:hidden}
+  .lanechart canvas{width:100%;height:100%;display:block}
+  .matchgrid{display:grid;gap:12px;grid-template-columns:repeat(auto-fill,minmax(280px,1fr))}
+  .matchcard{background:var(--panel);border:1px solid var(--line);border-radius:8px;padding:10px}
+  .matchrow{display:flex;gap:8px;margin-top:8px}
+  .matchrow img{width:88px;height:88px;object-fit:cover;border-radius:4px;background:#0a0d11}
+  #top{position:relative}
+  #aqlSuggest{position:absolute;left:12px;right:120px;top:48px;z-index:30;
+    background:var(--panel);border:1px solid var(--line);border-radius:6px;
+    padding:8px 10px;box-shadow:0 8px 24px rgba(0,0,0,.35);max-height:220px;
+    overflow:auto;display:none}
+  #aqlSuggest .chip{display:inline-block;margin:3px 4px 3px 0;padding:3px 8px;
+    border:1px solid var(--line);border-radius:12px;font:11px var(--mono);
+    color:var(--ink-dim);cursor:pointer}
+  #aqlSuggest .chip:hover{border-color:var(--accent);color:var(--accent)}
+  #aqlSuggest h5{margin:6px 0 4px;font-size:10px;letter-spacing:.08em;
+    text-transform:uppercase;color:var(--ink-faint)}
+</style>
+</head>
+<body>
+<div id="app">
+  <div id="brand">
+    <div class="prod">Horizon · beyond XAMN</div>
+    <b>ARGUS</b>
+    <span id="ver"></span>
+  </div>
+
+  <div id="top">
+    <button class="btn" id="backWb" style="display:none">← Workflow</button>
+    <input id="q" placeholder='AQL  —  e.g.  category = "Messages" AND deleted = true'
+           spellcheck="false" autocomplete="off">
+    <select id="tz" class="tz" title="Display timezone"></select>
+    <input id="ownerIds" placeholder="Owner IDs (+91…)" spellcheck="false"
+      title="Comma-separated owner phone numbers for attribution" style="max-width:160px">
+    <button class="btn primary" id="run">Run</button>
+    <button class="btn" id="savedBtn" title="Saved views">Views</button>
+    <select id="saved" style="display:none;max-width:190px"></select>
+    <button class="btn" id="helpBtn" title="Keyboard shortcuts">?</button>
+    <div id="aqlSuggest"></div>
+  </div>
+
+  <nav id="rail"></nav>
+  <div id="main"></div>
+
+  <div id="status">
+    <span id="stCase">—</span>
+    <span id="stCount">—</span>
+    <span id="stIntegrity">—</span>
+    <span id="stMsg" style="margin-left:auto"></span>
+  </div>
+</div>
+
+<div id="help"><div class="box">
+  <h3>Keyboard</h3>
+  <table>
+    <tr><td><kbd>/</kbd></td><td>focus the query box</td>
+        <td><kbd>j</kbd> <kbd>k</kbd></td><td>next / previous row</td></tr>
+    <tr><td><kbd>Enter</kbd></td><td>open the selected row</td>
+        <td><kbd>Esc</kbd></td><td>close detail / clear focus</td></tr>
+    <tr><td><kbd>g</kbd> then <kbd>d</kbd></td><td>dashboard</td>
+        <td><kbd>g</kbd> then <kbd>t</kbd></td><td>timeline</td></tr>
+    <tr><td><kbd>g</kbd> then <kbd>m</kbd></td><td>messages</td>
+        <td><kbd>g</kbd> then <kbd>f</kbd></td><td>findings</td></tr>
+    <tr><td><kbd>g</kbd> then <kbd>i</kbd></td><td>media</td>
+        <td><kbd>g</kbd> then <kbd>c</kbd></td><td>conversations</td></tr>
+    <tr>        <td><kbd>g</kbd> then <kbd>k</kbd></td><td>keyword list</td>
+        <td><kbd>g</kbd> then <kbd>b</kbd></td><td>bookmarks</td></tr>
+    <tr><td><kbd>g</kbd> then <kbd>o</kbd></td><td>activity clock</td>
+        <td><kbd>g</kbd> then <kbd>s</kbd></td><td>file system</td></tr>
+  </table>
+  <p class="muted" style="margin:12px 0 0;font-size:11px">
+    Shortcuts are ignored while a text field has focus.</p>
+</div></div>
+
+<script>
+"use strict";
+
+const QP = new URLSearchParams(location.search);
+const TOKEN = QP.get("token") || "";
+const CONTAINERS = QP.get("containers") || "";
+let TZ = 0;
+
+/* ══════════════════════════════════════════════════════════════ plumbing */
+const $ = (s, r) => (r || document).querySelector(s);
+const el = (t, c, x) => { const n = document.createElement(t);
+  if (c) n.className = c; if (x !== undefined) n.textContent = x; return n; };
+const esc = s => String(s == null ? "" : s)
+  .replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;");
+
+function apiUrl(path, params) {
+  const u = new URL("/api/" + path, location.origin);
+  Object.entries(params || {}).forEach(([k, v]) => {
+    if (v !== undefined && v !== null && v !== "") u.searchParams.set(k, v);
+  });
+    if (TOKEN && !u.searchParams.has("token")) u.searchParams.set("token", TOKEN);
+  if (CONTAINERS && !u.searchParams.has("containers"))
+    u.searchParams.set("containers", CONTAINERS);
+  if (!u.searchParams.has("tz")) u.searchParams.set("tz", String(TZ));
+  return u;
+}
+
+async function api(path, params, retries = 3) {
+  let lastErr = null;
+  for (let i = 0; i < retries; i++) {
+    try {
+      const r = await fetch(apiUrl(path, params));
+      if (!r.ok) throw new Error(path + ": " + r.status + " " + await r.text());
+      say("", "");
+      return r.json();
+    } catch (e) {
+      lastErr = e;
+      if (i < retries - 1) {
+        say("Reconnecting…", "warn");
+        await new Promise(res => setTimeout(res, 400 * (i + 1)));
+      }
+    }
+  }
+  say(String(lastErr?.message || lastErr), "err");
+  throw lastErr;
+}
+
+async function post(path, body) {
+  const u = apiUrl(path, {});
+  const r = await fetch(u, {
+    method: "POST",
+    headers: { "Content-Type": "application/json", "X-ARGUS-Token": TOKEN },
+    body: JSON.stringify({ ...body, containers: CONTAINERS }),
+  });
+  if (!r.ok) throw new Error(path + ": " + r.status + " " + await r.text());
+  return r.json();
+}
+
+function blobUrl(sha) {
+  const u = apiUrl("blob/" + sha, {});
+  return u.pathname + u.search;
+}
+
+function say(msg, kind) {
+  const n = $("#stMsg");
+  n.textContent = msg || "";
+  n.style.color = kind === "err" ? "var(--danger)"
+                : kind === "ok" ? "var(--ok)" : "var(--ink-faint)";
+}
+
+/* State is deliberately a single object so a view is one serialisable thing —
+   which is what makes saved views and restore-on-reload possible at all. */
+const S = {
+  view: "dashboard",
+  q: "",
+  facets: {},          // {field: Set(values)}
+  span: null,          // [lo, hi] microseconds, from the scrubber
+  rows: [],
+  sel: -1,
+  detail: false,
+  overview: null,
+  intel: null,
+  pending: 0,
+  tableOffset: 0,
+  tableLimit: 500,
+  tableTotal: 0,
+  tz: 0,
+};
+
+/* ═══════════════════════════════════════════════════════════════════ AQL */
+/* Facets and the scrubber compose *into the query* rather than filtering the
+   page client-side. Filtering what has already been fetched silently answers a
+   different question than the one asked, and the count in the status bar would
+   stop meaning anything. */
+function effectiveQuery() {
+  const parts = [];
+  if (S.q.trim()) parts.push("(" + S.q.trim() + ")");
+  for (const [field, values] of Object.entries(S.facets)) {
+    const vs = [...values];
+    if (!vs.length) continue;
+    const key = field === "recovery" ? "recovery"
+              : field === "direction" ? "direction" : field;
+    parts.push("(" + vs.map(v =>
+      key + ' = "' + String(v).replace(/"/g, '\\"') + '"').join(" OR ") + ")");
+  }
+  if (S.span) {
+    parts.push("timestamp >= " + S.span[0]);
+    parts.push("timestamp <= " + S.span[1]);
+  }
+  return parts.join(" AND ");
+}
+
+/* ═══════════════════════════════════════════════════════════════════ nav */
+const VIEWS = [
+  { g: "Overview" },
+  { id: "dashboard",     label: "Dashboard",     key: "g d" },
+  { id: "clock",         label: "Activity clock", key: "g o" },
+  { id: "findings",      label: "Findings",      key: "g f" },
+  { id: "integrity",     label: "Integrity" },
+  { g: "Evidence" },
+  { id: "timeline",      label: "Timeline",      key: "g t" },
+  { id: "analytics",     label: "Analytics",     key: "g a" },
+  { id: "messages",      label: "Messages",      key: "g m", cat: "Messages" },
+  { id: "calls",         label: "Calls",         cat: "Calls" },
+  { id: "contacts",      label: "Contacts",      cat: "Contacts" },
+  { id: "web",           label: "Web",           cat: "Web" },
+  { id: "locations",     label: "Locations",     cat: "Places" },
+  { id: "calendar",      label: "Calendar",      cat: "Calendar" },
+  { id: "places",        label: "Map",           key: "g p" },
+  { id: "media",         label: "Media",         key: "g i" },
+  { id: "files",         label: "File system",   key: "g s" },
+  { id: "accounts",      label: "Accounts",      cat: "Accounts" },
+  { id: "networks",      label: "Networks",      cat: "Networks" },
+  { id: "mediamatch",    label: "Media matches" },
+  { id: "deleted",       label: "Deleted",       key: "x" },
+  { id: "bookmarks",     label: "Project",       key: "g b" },
+  { id: "keywords",      label: "Keyword list",  key: "g k" },
+  { g: "Analysis" },
+  { id: "conversations", label: "Conversations", key: "g c" },
+  { id: "entities",      label: "Entities" },
+  { id: "graph",         label: "Connections",   key: "g n" },
+  { id: "communities",   label: "Communities" },
+  { id: "fusion",        label: "Attribution" },
+  { id: "apps",          label: "Applications" },
+  { g: "Provenance" },
+  { id: "log",           label: "Extraction log" },
+  { id: "audit",         label: "Audit trail" },
+];
+
+function buildRail() {
+  const rail = $("#rail");
+  rail.innerHTML = "";
+  const cats = (S.overview && (S.overview.categories || {})) || {};
+  for (const v of VIEWS) {
+    if (v.g) { rail.appendChild(el("div", "navgroup", v.g)); continue; }
+    const b = el("button", "nav" + (S.view === v.id ? " on" : ""));
+    b.appendChild(el("span", "", v.label));
+    const n = v.cat ? cats[v.cat] : null;
+    if (n) b.appendChild(el("span", "n", Number(n).toLocaleString()));
+    else if (v.key) b.appendChild(el("span", "k", v.key));
+    b.onclick = () => go(v.id);
+    b.dataset.view = v.id;
+    rail.appendChild(b);
+  }
+}
+
+function go(view) {
+  S.view = view;
+  S.sel = -1;
+  buildRail();
+  render();
+  try { localStorage.setItem("argus.view", view); } catch (e) {}
+}
+
+/* ═════════════════════════════════════════════════════════════════ render */
+const MAIN = () => $("#main");
+
+function loading(msg) {
+  MAIN().innerHTML = "";
+  const d = el("div", "empty");
+  d.appendChild(el("span", "spin"));
+  d.appendChild(el("div", "", msg || "Working…"));
+  MAIN().appendChild(d);
+}
+
+function emptyState(title, detail) {
+  MAIN().innerHTML = "";
+  const d = el("div", "empty");
+  d.appendChild(el("div", "big", title));
+  if (detail) d.appendChild(el("div", "", detail));
+  MAIN().appendChild(d);
+}
+
+async function render() {
+  const v = S.view;
+  try {
+    if (v === "dashboard")      return await viewDashboard();
+    if (v === "clock")          return await viewClock();
+    if (v === "files")          return await viewFiles();
+    if (v === "findings")       return await viewFindings();
+    if (v === "integrity")      return await viewIntegrity();
+    if (v === "timeline")       return await viewTable({ timeline: true });
+    if (v === "analytics")      return await viewAnalytics();
+    if (v === "places")         return await viewPlaces();
+    if (v === "mediamatch")     return await viewMediaMatches();
+    if (v === "fusion")         return await viewFusion();
+    if (v === "communities")    return await viewCommunities();
+    if (v === "media")          return await viewMedia();
+    if (v === "conversations")  return await viewConversations();
+    if (v === "entities")       return await viewEntities();
+    if (v === "graph")          return await viewGraph();
+    if (v === "apps")           return await viewApps();
+    if (v === "log")            return await viewLog("log", "Extraction log");
+    if (v === "audit")          return await viewLog("audit", "Audit trail");
+    if (v === "deleted")        return await viewTable({ deleted: true });
+    if (v === "bookmarks")      return await viewBookmarks();
+    if (v === "keywords")       return await viewKeywords();
+    if (v === "contacts")       return await viewColumn("Contacts", { reset: true });
+    if (v === "calls")          return await viewColumn("Calls", { reset: true });
+    const def = VIEWS.find(x => x.id === v);
+    return await viewTable({ cat: def && def.cat });
+  } catch (e) {
+    emptyState("Could not load this view", String(e.message || e));
+    say(String(e.message || e), "err");
+  }
+}
+
+/* ─────────────────────────────────────────────────────────────── dashboard */
+const CAT_COL = {
+  Messages: "#4c9aff", Calls: "#3fb950", Contacts: "#a371f7",
+  "Files & Media": "#e2b33c", Web: "#f778ba", Locations: "#56d4dd",
+  Places: "#56d4dd", Calendar: "#ff9a3c", Applications: "#8b949e",
+  Chats: "#58a6ff", Other: "#6e7681",
+};
+const DIR_COL = { incoming: "#3fb950", outgoing: "#4c9aff",
+  missed: "#e5534b", rejected: "#ff9a3c", draft: "#8b949e", unknown: "#6e7681" };
+const REC_COL = { allocated: "#4c9aff", "deleted-freelist": "#e5534b",
+  "deleted-unallocated": "#ff6b6b", carved: "#ff9a3c", wal: "#a371f7",
+  journal: "#f778ba" };
+
+async function viewDashboard() {
+  loading("Loading command center…");
+  const dashP = api("dashboard");
+  const ov = S.overview || await api("overview");
+  S.overview = ov;
+  const dash = await dashP.catch(() => ({}));
+  const cc = dash.overview || ov;
+  if (cc.exhibit_id || ov.exhibit_id) {
+    document.title = "ARGUS — Analysis " + (cc.exhibit_id || ov.exhibit_id);
+  }
+
+  MAIN().innerHTML = "";
+  const g = el("div", "grid");
+  g.appendChild(commandHero(cc, dash));
+  g.appendChild(alertRibbon(dash.triage || {}));
+  if (dash.comms_quality) g.appendChild(commsQualityCard(dash.comms_quality));
+  if ((dash.recommendations || []).length) g.appendChild(nextStepsCard(dash.recommendations));
+  g.appendChild(extractionProvenanceCard(dash.extraction || {}));
+  g.appendChild(kpiGrid(dash, ov));
+  g.appendChild(quickLaunch(dash));
+
+  const intelHost = el("div", "grid");
+  intelHost.id = "intelCards";
+  intelHost.style.gridColumn = "1 / -1";
+  intelHost.appendChild(el("div", "muted", "Loading investigative intelligence…"));
+  g.appendChild(intelHost);
+
+  const mid = el("div", "grid");
+  mid.style.gridColumn = "1 / -1";
+  mid.appendChild(temporalIntelCard(dash));
+  mid.appendChild(recentFeed(dash.recent || []));
+  mid.appendChild(parserCard(dash.parsers || []));
+  g.appendChild(mid);
+
+  const vizSlot = el("div");
+  vizSlot.id = "dashViz";
+  vizSlot.style.gridColumn = "1 / -1";
+  g.appendChild(vizSlot);
+
+  MAIN().appendChild(g);
+  paintStatus();
+  paintViz(dash);
+
+  const paintIntel = (intel) => {
+    S.intel = intel;
+    intelHost.innerHTML = "";
+    const ig = el("div", "grid");
+    ig.style.gridColumn = "1 / -1";
+
+    const f = (intel.findings || {});
+    const c3 = el("div", "card");
+    c3.appendChild(el("h3", "", "Investigative findings"));
+    c3.appendChild(el("div", "big", String(f.total || 0)));
+    const sev = f.by_severity || {};
+    for (const k of ["critical", "high", "medium", "low", "info"]) {
+      if (!sev[k]) continue;
+      const r = el("div", "kv");
+      const label = el("b", "", k);
+      if (k === "critical" || k === "high") label.style.color = "var(--danger)";
+      r.appendChild(label);
+      r.appendChild(el("span", "mono", String(sev[k])));
+      c3.appendChild(r);
+    }
+    const goF = el("button", "btn", "Open lead sheet");
+    goF.style.marginTop = "9px"; goF.onclick = () => go("findings");
+    c3.appendChild(goF);
+    ig.appendChild(c3);
+
+    const e = intel.entities || {};
+    const c4 = el("div", "card");
+    c4.appendChild(el("h3", "", "Validated entities"));
+    c4.appendChild(el("div", "big", String(e.total_entities || e.total || 0)));
+    for (const [k, n] of Object.entries(e.by_kind || e.by_type || {})
+                              .sort((a, b) => b[1] - a[1]).slice(0, 8)) {
+      const r = el("div", "kv");
+      r.appendChild(el("b", "", k));
+      r.appendChild(el("span", "mono", String(n)));
+      c4.appendChild(r);
+    }
+    c4.appendChild(el("div", "muted",
+      "Checksum-validated only — card numbers pass Luhn and a real issuer " +
+      "range, IBANs pass mod-97, crypto addresses pass Base58Check or bech32."));
+    ig.appendChild(c4);
+
+    const com = intel.communities || {};
+    const c5 = el("div", "card");
+    c5.appendChild(el("h3", "", "Community structure"));
+    if (com.meaningful) {
+      c5.appendChild(el("div", "big", String(com.count)));
+      c5.appendChild(el("div", "muted",
+        "Modularity " + (com.modularity != null
+          ? Number(com.modularity).toFixed(3) : "—") +
+        ". Above 0.3 with more than one group, so the split is structural " +
+        "rather than an artefact of one busy contact."));
+    } else {
+      c5.appendChild(el("div", "big muted", "None"));
+      c5.appendChild(el("div", "muted", com.note ||
+        "No community structure worth reporting. A single hub with spokes is " +
+        "what one popular contact looks like, not a network."));
+    }
+    ig.appendChild(c5);
+
+    const fu = intel.fusion || {};
+    const c6 = el("div", "card");
+    c6.appendChild(el("h3", "", "Device-use attribution"));
+    c6.appendChild(el("div", "big",
+      fu.coverage != null ? Math.round(fu.coverage * 100) + "%" : "—"));
+    c6.appendChild(el("div", "muted",
+      "Share of events that could be tied to the device being in use by its " +
+      "owner, corroborated by independent usage telemetry. Events outside " +
+      "that coverage are reported as unknown, never as 'not the owner'."));
+    ig.appendChild(c6);
+
+    if ((f.top || []).length) {
+      const c7 = el("div", "card wide");
+      c7.appendChild(el("h3", "", "Highest-priority findings"));
+      (f.top || []).forEach(x => c7.appendChild(findingNode(x)));
+      ig.appendChild(c7);
+    }
+    intelHost.appendChild(ig);
+  };
+
+  (S.intel ? Promise.resolve(S.intel) : api("intel"))
+    .then(paintIntel).catch(() => {
+      intelHost.innerHTML = "";
+      intelHost.appendChild(el("div", "muted",
+        "Intelligence engine unavailable for this container."));
+    });
+}
+
+function commandHero(cc, dash) {
+  const dev = cc.device || {};
+  const hero = el("div", "cmd-hero");
+  const left = el("div");
+  const exh = cc.exhibit_id || "Exhibit";
+  left.appendChild(el("div", "muted", "Command center"));
+  left.appendChild(el("div", "exh", exh));
+  const name = [dev.make, dev.model].filter(Boolean).join(" ") || "Unknown device";
+  left.appendChild(el("div", "sub",
+    name + (dev.os ? " · " + dev.os : "") +
+    (cc.case_id ? " · Case " + cc.case_id : "")));
+  if (cc.first_activity || cc.last_activity || dash.first_activity) {
+    left.appendChild(el("div", "sub",
+      (dash.first_activity || cc.first_activity || "—").slice(0, 16) + " → " +
+      (dash.last_activity || cc.last_activity || "—").slice(0, 16)));
+  }
+  const badges = el("div", "cmd-badges");
+  const ok = cc.integrity_ok !== false;
+  badges.appendChild(el("span", "cmd-badge " + (ok ? "ok" : "bad"),
+    ok ? "Integrity verified" : "Integrity failed"));
+  if (cc.method) badges.appendChild(el("span", "cmd-badge", cc.method));
+  if (cc.encryption_level) badges.appendChild(el("span", "cmd-badge warn",
+    cc.encryption_level.length > 28
+      ? cc.encryption_level.slice(0, 26) + "…" : cc.encryption_level));
+  if (dev.lock_state) badges.appendChild(el("span", "cmd-badge", dev.lock_state));
+  left.appendChild(badges);
+  hero.appendChild(left);
+
+  const mid = el("div");
+  mid.appendChild(el("h3", "", "Identifiers"));
+  [["Operator", cc.operator], ["IMEI", dev.imei], ["Serial", dev.serial],
+   ["Phone", dev.phone_number], ["ICCID", dev.iccid]].forEach(([k, v]) => {
+    if (!v) return;
+    const r = el("div", "kv");
+    r.appendChild(el("b", "", k));
+    r.appendChild(el("span", "mono", String(v)));
+    mid.appendChild(r);
+  });
+  hero.appendChild(mid);
+
+  const health = dash.health || {};
+  const score = el("div", "cmd-score");
+  const ring = el("div", "score-ring");
+  ring.style.setProperty("--pct", String(health.score || 0));
+  ring.appendChild(el("b", "", String(health.score != null ? health.score : "—")));
+  score.appendChild(ring);
+  score.appendChild(el("div", "muted",
+    (health.label || "readiness") + " examination health"));
+  hero.appendChild(score);
+  return hero;
+}
+
+function extractionProvenanceCard(ext) {
+  const card = el("div", "cmd-alerts");
+  card.style.gridColumn = "1 / -1";
+  const hdr = el("div", "cmd-alert");
+  hdr.appendChild(el("h5", "", "Extraction & decode provenance"));
+  const sub = (ext.method || "unknown") + (ext.sealed ? " · sealed" : "");
+  hdr.appendChild(el("p", "", sub));
+  card.appendChild(hdr);
+  const cov = ext.decode_coverage_pct != null ? ext.decode_coverage_pct : "—";
+  const stats = el("div", "cmd-alert");
+  stats.appendChild(el("h5", "", "Decode coverage " + (cov !== "—" ? cov + "%" : "—")));
+  stats.appendChild(el("p", "",
+    `${(ext.decode_files_parsed || 0).toLocaleString()} files parsed · ` +
+    `${(ext.decode_files_seen || 0).toLocaleString()} examined · ` +
+    `${ext.source_paths || 0} source paths`));
+  card.appendChild(stats);
+  if (ext.mtp_completeness) {
+    const mtp = el("div", "cmd-alert warn");
+    mtp.appendChild(el("h5", "", "MTP completeness"));
+    mtp.appendChild(el("p", "", ext.mtp_completeness));
+    card.appendChild(mtp);
+  }
+  const prep = ext.preprocess_summary || {};
+  const wa = prep.whatsapp_decrypt || {};
+  if (wa.attempted) {
+    const row = el("div", "cmd-alert " + (wa.decrypted ? "" : "warn"));
+    row.appendChild(el("h5", "", "WhatsApp decrypt"));
+    row.appendChild(el("p", "",
+      `${wa.decrypted || 0}/${wa.attempted} backup(s) opened` +
+      (wa.decrypted ? " — msgstore ready for decode" : " — add recovery key or re-run Comprehensive")));
+    card.appendChild(row);
+  }
+  const af = prep.antiforensics || {};
+  if (af.indicator_count) {
+    const row = el("div", "cmd-alert warn");
+    row.appendChild(el("h5", "", "Antiforensics at acquisition"));
+    row.appendChild(el("p", "",
+      `${af.indicator_count} indicator(s) — ${(af.encrypted_stores || []).length} encrypted, ` +
+      `${(af.vault_directories || []).length} vault path(s), ` +
+      `${(af.suspect_apps || []).length} suspect app(s)`));
+    card.appendChild(row);
+  }
+  (ext.audit_warnings || []).slice(0, 4).forEach(a => {
+    const cls = a.severity === "critical" ? "bad"
+      : (a.severity === "action_required" ? "warn" : "");
+    const row = el("div", "cmd-alert " + cls);
+    row.appendChild(el("p", "", a.message || ""));
+    card.appendChild(row);
+  });
+  return card;
+}
+
+function commsQualityCard(cq) {
+  const card = el("div", "cmd-alerts");
+  card.style.gridColumn = "1 / -1";
+  const hdr = el("div", "cmd-alert");
+  hdr.appendChild(el("h5", "", "Communications quality"));
+  const dec = cq.decoded || {};
+  hdr.appendChild(el("p", "",
+    `Decoded: ${(dec.messages || 0).toLocaleString()} messages · ` +
+    `${(dec.contacts || 0).toLocaleString()} contacts · ` +
+    `${(dec.calls || 0).toLocaleString()} calls` +
+    (cq.provider_row_total ? ` · ${cq.provider_row_total.toLocaleString()} provider rows acquired` : "")));
+  card.appendChild(hdr);
+  if (cq.is_vivo && cq.pattern === "vivo_fallback") {
+    const note = el("div", "cmd-alert warn");
+    note.appendChild(el("h5", "", "Vivo Y02 pattern"));
+    note.appendChild(el("p", "",
+      "Messages decoded via logical/dumpsys paths — contacts/calls often 0 from live providers. Review Files → raw/logical/content/ and dumpsys/."));
+    card.appendChild(note);
+  }
+  const providers = cq.providers || [];
+  if (providers.length) {
+    const tbl = el("div", "cmd-alert");
+    tbl.appendChild(el("h5", "", "Content providers"));
+    providers.slice(0, 10).forEach(p => {
+      const r = el("div", "kv");
+      const rows = p.rows != null ? p.rows : "—";
+      const ok = Number(rows) > 0;
+      r.appendChild(el("b", "", (p.key || p.uri || "?") + (ok ? "" : " (empty)")));
+      r.appendChild(el("span", "mono", String(rows) + " rows"));
+      tbl.appendChild(r);
+    });
+    card.appendChild(tbl);
+  }
+  const dumps = cq.logical_dumps || {};
+  const dumpKeys = Object.keys(dumps).filter(k => dumps[k] > 0);
+  if (dumpKeys.length) {
+    const d = el("div", "cmd-alert");
+    d.appendChild(el("h5", "", "Logical dumps on disk"));
+    dumpKeys.slice(0, 8).forEach(k => {
+      const r = el("div", "kv");
+      r.appendChild(el("b", "", k));
+      r.appendChild(el("span", "mono", String(dumps[k]) + " rows"));
+      d.appendChild(r);
+    });
+    card.appendChild(d);
+  }
+  return card;
+}
+
+function nextStepsCard(recs) {
+  const card = el("div", "cmd-alerts");
+  card.style.gridColumn = "1 / -1";
+  if (!recs || !recs.length) return card;
+  const hdr = el("div", "cmd-alert");
+  hdr.appendChild(el("h5", "", "Recommended next steps"));
+  card.appendChild(hdr);
+  recs.slice(0, 6).forEach(r => {
+    const row = el("div", "cmd-alert " + (r.severity === "critical" ? "bad"
+      : r.severity === "high" ? "warn" : ""));
+    row.appendChild(el("h5", "", r.title || ""));
+    row.appendChild(el("p", "", r.detail || ""));
+    if (r.view) {
+      row.style.cursor = "pointer";
+      row.onclick = () => go(r.view);
+    }
+    card.appendChild(row);
+  });
+  return card;
+}
+
+function alertRibbon(triage) {
+  const wrap = el("div", "cmd-alerts");
+  const alerts = triage.alerts || [];
+  if (!alerts.length) {
+    const ok = el("div", "cmd-alert");
+    ok.appendChild(el("h5", "", "No triage alerts"));
+    ok.appendChild(el("p", "", "Integrity, recovery posture, and decode coverage look routine."));
+    wrap.appendChild(ok);
+    return wrap;
+  }
+  alerts.forEach(a => {
+    const row = el("div", "cmd-alert " + (a.level || "warn"));
+    const body = el("div");
+    body.appendChild(el("h5", "", a.title || "Alert"));
+    body.appendChild(el("p", "", a.detail || ""));
+    row.appendChild(body);
+    if ((a.title || "").toLowerCase().includes("deleted")) {
+      row.onclick = () => go("deleted");
+    } else if ((a.title || "").toLowerCase().includes("integrity")) {
+      row.onclick = () => go("integrity");
+    } else if ((a.title || "").toLowerCase().includes("encrypted")) {
+      row.onclick = () => go("findings");
+    }
+    wrap.appendChild(row);
+  });
+  return wrap;
+}
+
+function kpiGrid(dash, ov) {
+  const wrap = el("div", "kpi-grid");
+  const cov = dash.coverage || {};
+  const total = dash.total_artifacts || ov.total_artifacts || 0;
+  const items = [
+    ["Artifacts", total, "", () => go("timeline")],
+    ["Timestamped", cov.timestamped_pct + "%", dash.timestamped + " dated", () => go("timeline")],
+    ["Recovered", dash.deleted_recovered || 0, "deleted / carved", () => go("deleted")],
+    ["Geolocated", cov.geolocated_pct + "%", (dash.geolocated || 0) + " with GPS", () => go("places")],
+    ["Comms / day", cov.comms_per_day || "—", "calls + messages", () => go("messages")],
+    ["Active days", (dash.temporal || {}).active_days || "—", "with events", () => go("clock")],
+    ["Categories", cov.category_count || 0, "artifact types", () => go("analytics")],
+    ["Applications", cov.app_count || 0, "sources", () => go("timeline")],
+    ["Night use", ((dash.temporal || {}).night_activity_pct || 0) + "%", "00:00–06:00", () => go("clock")],
+    ["Call time", dash.total_call_display || "—", "total duration", () => go("calls")],
+    ["Bookmarks", (dash.tags || []).reduce((a, t) => a + (t.count || 0), 0),
+     (dash.tags || []).length + " tag(s)", () => go("bookmarks")],
+    ["Parsers", (dash.parsers || []).length, cov.source_count + " sources", () => go("files")],
+  ];
+  items.forEach(([label, n, sub, fn]) => {
+    const k = el("div", "kpi");
+    k.appendChild(el("div", "n", typeof n === "number" ? n.toLocaleString() : String(n)));
+    k.appendChild(el("div", "l", label));
+    if (sub) k.appendChild(el("div", "s", sub));
+    k.onclick = fn;
+    wrap.appendChild(k);
+  });
+  return wrap;
+}
+
+function quickLaunch() {
+  const wrap = el("div", "quick-grid");
+  wrap.appendChild(el("div", "sect", "", "Quick launch"));
+  [
+    ["Timeline", "Every artifact, time-ordered", "timeline"],
+    ["Findings", "Rule hits & lead sheet", "findings"],
+    ["Messages", "SMS, chat, WhatsApp", "messages"],
+    ["Calls", "Voice & video records", "calls"],
+    ["Contacts", "Address book columns", "contacts"],
+    ["Graph", "Communication network", "graph"],
+    ["Map", "GPS clusters & tracks", "places"],
+    ["Gallery", "Pictures & videos", "media"],
+    ["Keywords", "Hit-list scan", "keywords"],
+    ["Integrity", "Seal verification", "integrity"],
+    ["Export", "CSV from current query", "timeline"],
+  ].forEach(([title, desc, view]) => {
+    const b = el("button", "quick");
+    b.appendChild(el("b", "", title));
+    b.appendChild(document.createTextNode(desc));
+    b.onclick = () => go(view);
+    wrap.appendChild(b);
+  });
+  return wrap;
+}
+
+function temporalIntelCard(dash) {
+  const t = dash.temporal || {};
+  const card = el("div", "card span2");
+  card.appendChild(el("h3", "", "Temporal intelligence"));
+  const grid = el("div", "temp-insight");
+  [
+    ["Peak hour", t.peak_hour != null ? String(t.peak_hour).padStart(2, "0") + ":00" : "—"],
+    ["Peak day", t.peak_day || "—"],
+    ["Busiest day", (t.busiest_day || {}).date || "—",
+     ((t.busiest_day || {}).total || 0) + " events"],
+    ["Avg / active day", t.avg_events_per_active_day || "—"],
+    ["Night activity", (t.night_activity_pct || 0) + "%"],
+    ["Span", (dash.span_days || 0) + " days"],
+  ].forEach(row => {
+    const box = el("div", "box");
+    box.appendChild(el("div", "n", String(row[1])));
+    box.appendChild(el("div", "l", row[0] + (row[2] ? " · " + row[2] : "")));
+    grid.appendChild(box);
+  });
+  card.appendChild(grid);
+  if ((t.bursts || []).length) {
+    card.appendChild(el("h4", "", "Activity bursts"));
+    t.bursts.slice(0, 4).forEach(b => {
+      const r = el("div", "kv");
+      r.appendChild(el("b", "", b.date || ""));
+      r.appendChild(el("span", "mono",
+        (b.count || 0) + " events (" + (b.ratio || "—") + "× median)"));
+      card.appendChild(r);
+    });
+  }
+  if ((t.gaps || []).length) {
+    card.appendChild(el("h4", "", "Longest gaps"));
+    t.gaps.forEach(g => {
+      const r = el("div", "kv");
+      r.appendChild(el("b", "", (g.days || 0) + " days"));
+      r.appendChild(el("span", "", (g.from || "") + " → " + (g.to || "")));
+      card.appendChild(r);
+    });
+  }
+  return card;
+}
+
+function recentFeed(rows) {
+  const card = el("div", "card");
+  card.appendChild(el("h3", "", "Latest activity"));
+  if (!rows.length) {
+    card.appendChild(el("div", "muted", "No timestamped artifacts yet."));
+    return card;
+  }
+  const feed = el("div", "feed");
+  rows.forEach(r => {
+    const row = el("div", "row");
+    row.appendChild(el("span", "ts", (r.timestamp_iso || "").slice(0, 16)));
+    const mid = el("div");
+    mid.appendChild(el("div", "sum",
+      (r.category || "") + (r.subtype ? " · " + r.subtype : "") +
+      (r.app ? " · " + r.app : "")));
+    mid.appendChild(el("div", "muted sum", r.body || ""));
+    row.appendChild(mid);
+    const pill = el("span", "pill" + (r.is_deleted ? " del" : ""), r.recovery || "");
+    row.appendChild(pill);
+    row.onclick = () => showDetail(r.artifact_id);
+    feed.appendChild(row);
+  });
+  card.appendChild(feed);
+  return card;
+}
+
+function parserCard(parsers) {
+  const card = el("div", "card");
+  card.appendChild(el("h3", "", "Decode coverage"));
+  if (!parsers.length) {
+    card.appendChild(el("div", "muted", "No parser registry recorded."));
+    return card;
+  }
+  parsers.slice(0, 10).forEach(p => {
+    const r = el("div", "parser-row");
+    r.appendChild(el("span", "", p.parser || "(unknown)"));
+    r.appendChild(el("span", "mono",
+      (p.artifacts || 0).toLocaleString() + " · " + (p.paths || 0) + " path(s)"));
+    card.appendChild(r);
+  });
+  return card;
+}
+
+function paintViz(viz) {
+    const charts = viz.charts || {};
+    const ct = viz.contacts || {};
+    const wrap = el("div", "grid");
+    wrap.style.gridColumn = "1 / -1";
+
+    wrap.appendChild(sectionTitle("Evidence landscape"));
+    wrap.appendChild(hbarCard("Evidence by category", viz.categories || [],
+      (row) => {
+        S.q = 'category:"' + row.label + '"';
+        $("#q").value = S.q; go("timeline");
+      }, (lab) => CAT_COL[lab] || "#4c9aff"));
+    wrap.appendChild(donutCard("Traffic direction", viz.directions || [], DIR_COL));
+    wrap.appendChild(donutCard("Recovery posture", viz.recovery || [], REC_COL));
+    addIf(wrap, viz.subtypes, hbarCard("Record subtypes", viz.subtypes || [],
+      (row) => {
+        const cat = String(row.label || "").split(" · ")[0];
+        S.q = 'category:"' + cat + '"';
+        $("#q").value = S.q; go("timeline");
+      }, (lab) => CAT_COL[String(lab).split(" · ")[0]] || "#8b949e"));
+
+    wrap.appendChild(sectionTitle("Communications"));
+    wrap.appendChild(commsMixCard(viz));
+    addIf(wrap, viz.call_directions, donutCard("Call direction", viz.call_directions || [], DIR_COL));
+    addIf(wrap, viz.call_durations, hbarCard("Call duration", viz.call_durations || [], null,
+      (lab) => lab === "unknown" ? "#6e7681" : "#3fb950"));
+    addIf(wrap, viz.message_apps, hbarCard("Messages by app", viz.message_apps || [],
+      (row) => {
+        S.q = 'app:"' + row.label + '" AND (category:"Messages" OR category:"Chats")';
+        $("#q").value = S.q; go("messages");
+      }, () => "#4c9aff"));
+    wrap.appendChild(contactsVizCard(ct));
+    wrap.appendChild(networkCard(ct));
+
+    wrap.appendChild(sectionTitle("Places & movement"));
+    wrap.appendChild(placesCard(viz));
+
+    wrap.appendChild(sectionTitle("Media, web & device"));
+    if ((viz.media || {}).total) wrap.appendChild(mediaCard(viz));
+    addIf(wrap, viz.web_domains, hbarCard("Visited domains", viz.web_domains || [],
+      (row) => {
+        S.q = 'category:"Web" AND "' + String(row.label).replace(/"/g, "") + '"';
+        $("#q").value = S.q; go("web");
+      }, () => "#f778ba"));
+    addIf(wrap, viz.web_subtypes, donutCard("Web activity", viz.web_subtypes || [], {
+      "Visited page": "#f778ba", Download: "#e2b33c", "Search term": "#4c9aff"
+    }));
+    addIf(wrap, viz.ssids, hbarCard("Wi-Fi networks", viz.ssids || [],
+      (row) => {
+        S.q = 'category:"Networks" AND "' + String(row.label).replace(/"/g, "") + '"';
+        $("#q").value = S.q; go("timeline");
+      }, () => "#56d4dd"));
+    addIf(wrap, viz.accounts, hbarCard("Accounts", viz.accounts || [],
+      (row) => {
+        S.q = 'category:"Accounts"';
+        $("#q").value = S.q; go("timeline");
+      }, () => "#ff9a3c"));
+    wrap.appendChild(hbarCard("Applications", viz.applications || [],
+      (row) => {
+        S.q = 'app:"' + row.label + '"';
+        $("#q").value = S.q; go("timeline");
+      }, () => "#a371f7"));
+
+    wrap.appendChild(sectionTitle("When the device was used"));
+    wrap.appendChild(clockCard(charts));
+    wrap.appendChild(activityCard(viz, charts));
+
+    const slot = $("#dashViz");
+    if (!slot) return;
+    slot.innerHTML = "";
+    slot.appendChild(wrap);
+}
+
+function findingNode(x) {
+  const sev = (x.severity || "info").toLowerCase();
+  const d = el("div", "finding " + sev);
+  d.appendChild(el("h5", "", x.title || x.rule || "Finding"));
+  if (x.detail || x.summary) d.appendChild(el("p", "", x.detail || x.summary));
+  if (x.why_it_matters)
+    d.appendChild(el("div", "why", "Why it matters: " + x.why_it_matters));
+  if (x.caveat) d.appendChild(el("div", "caveat", "Caveat: " + x.caveat));
+  const ids = x.artifact_ids || [];
+  if (ids.length) {
+    const b = el("button", "btn", "Show " + ids.length + " cited artifact" +
+                (ids.length === 1 ? "" : "s"));
+    b.style.marginTop = "6px";
+    b.onclick = () => {
+      S.q = ids.map(i => 'id = "' + i + '"').join(" OR ");
+      $("#q").value = S.q; S.facets = {}; S.span = null; go("timeline");
+    };
+    d.appendChild(b);
+  }
+  return d;
+}
+
+async function viewFindings() {
+  loading("Running the finding rules…");
+  const owner = ($("#ownerIds")?.value || "").trim();
+  const payload = await api("intelligence", owner ? { owner } : {});
+  const f = payload.findings || {};
+  const list = f.findings || [];
+  const sev = f.by_severity || {};
+  const order = ["critical", "high", "medium", "low", "info"];
+  MAIN().innerHTML = "";
+  if (!list.length && !f.count) {
+    return emptyState("No findings",
+      "The rules ran and matched nothing. That is a result, not an error.");
+  }
+  const g = el("div", "grid");
+  const head = el("div", "card wide");
+  head.innerHTML = `<h2>Intelligence — ${num(f.count || list.length)} finding(s)</h2>
+    <div class="inline" style="gap:8px;flex-wrap:wrap;margin-bottom:12px">
+      ${order.filter(k => sev[k]).map(k =>
+        `<span class="pill ${k === "critical" ? "bad" : k === "high" ? "warn" : "ok"}">${esc(k)}: ${sev[k]}</span>`
+      ).join("")}
+      <span class="pill">${num(f.artifacts_analysed || 0)} artifacts</span>
+      <span class="pill">${num(f.rules_run || 0)} rules</span>
+    </div>`;
+  const recs = payload.recommendations || [];
+  if (recs.length) {
+    const recCard = el("div", "card wide");
+    recCard.innerHTML = `<h3>Next steps</h3>` + recs.slice(0, 4).map(r =>
+      `<div style="margin:8px 0;padding:8px;border:1px solid var(--line);border-radius:6px">
+        <b>${esc(r.title)}</b>
+        <div class="muted" style="font-size:12px;margin-top:4px">${esc(r.detail || "")}</div>
+      </div>`).join("");
+    g.appendChild(recCard);
+  }
+  g.appendChild(head);
+  const card = el("div", "card wide");
+  const sort = { critical: 0, high: 1, medium: 2, low: 3, info: 4 };
+  list.slice().sort((a, b) => (sort[a.severity] ?? 9) - (sort[b.severity] ?? 9))
+    .forEach(x => card.appendChild(findingNode(x)));
+  g.appendChild(card);
+  MAIN().appendChild(g);
+}
+
+/* ───────────────────────────────────────────────────────────────── tables */
+async function viewTable(opts) {
+  opts = opts || {};
+  loading("Querying…");
+
+  let q = effectiveQuery();
+  if (opts.cat) q = (q ? q + " AND " : "") + 'category = "' + opts.cat + '"';
+  if (opts.deleted) q = (q ? q + " AND " : "") + "deleted = true";
+  if (opts.reset) S.tableOffset = 0;
+
+  const offset = S.tableOffset || 0;
+  const limit = S.tableLimit || 500;
+
+  const [res, facets] = await Promise.all([
+    api("search", { q, limit, offset, order: "timestamp DESC" }),
+    api("facets", { q }).catch(() => null),
+  ]);
+  S.rows = res.artifacts || [];
+  S.tableTotal = res.total || 0;
+  S.tableOffset = res.offset || offset;
+
+  MAIN().innerHTML = "";
+  const split = el("div", "split" + (S.detail ? " detail" : ""));
+
+  const facetPane = el("div", "", ""); facetPane.id = "facets";
+  renderFacets(facetPane, facets);
+  split.appendChild(facetPane);
+
+  const listPane = el("div"); listPane.id = "list";
+  if (opts.timeline) listPane.appendChild(scrubber());
+  listPane.appendChild(rowsTable(S.rows));
+  listPane.appendChild(tablePager(opts));
+  split.appendChild(listPane);
+
+  const detailPane = el("div"); detailPane.id = "detail";
+  split.appendChild(detailPane);
+
+  MAIN().appendChild(split);
+  paintStatus(S.rows.length, facets && facets.total);
+}
+
+function tablePager(opts) {
+  const bar = el("div", "");
+  bar.style.cssText = "display:flex;gap:10px;align-items:center;padding:10px 12px;"
+    + "border-top:1px solid var(--line);background:var(--panel);flex-wrap:wrap";
+  const total = S.tableTotal || 0;
+  const off = S.tableOffset || 0;
+  const shown = S.rows.length;
+  const limit = S.tableLimit || 500;
+  bar.appendChild(el("span", "muted",
+    total ? `${(off + 1).toLocaleString()}–${(off + shown).toLocaleString()} of ${total.toLocaleString()}`
+          : "0 results"));
+  if (off > 0) {
+    const prev = el("button", "btn", "← Previous");
+    prev.onclick = () => {
+      S.tableOffset = Math.max(0, off - limit);
+      if (opts.column) viewColumn(opts.column, {});
+      else viewTable(opts);
+    };
+    bar.appendChild(prev);
+  }
+  if (off + shown < total) {
+    const next = el("button", "btn", "Next →");
+    next.onclick = () => {
+      S.tableOffset = off + limit;
+      if (opts.column) viewColumn(opts.column, {});
+      else viewTable(opts);
+    };
+    bar.appendChild(next);
+  }
+  const exp = el("button", "btn", "Export CSV");
+  exp.onclick = () => exportResults("csv");
+  bar.appendChild(exp);
+  const expj = el("button", "btn", "Export JSON");
+  expj.onclick = () => exportResults("json");
+  bar.appendChild(expj);
+  return bar;
+}
+
+function exportResults(fmt) {
+  const u = apiUrl("export", { q: effectiveQuery(), format: fmt || "csv", limit: 5000 });
+  window.open(u.href, "_blank");
+}
+
+async function viewBookmarks() {
+  loading("Loading bookmarks…");
+  const data = await api("bookmarks", { limit: 500 });
+  const items = data.artifacts || [];
+  MAIN().innerHTML = "";
+  if (!items.length) {
+    return emptyState("Project is empty",
+      "Open an artifact and save a tag, or click Flag as key evidence. "
+      + "This is the XAMN Project analogue — selected items for the report.");
+  }
+  S.rows = items;
+  const split = el("div", "split" + (S.detail ? " detail" : ""));
+  split.appendChild(el("div"));
+  const listPane = el("div"); listPane.id = "list";
+  listPane.appendChild(rowsTable(items));
+  split.appendChild(listPane);
+  const detailPane = el("div"); detailPane.id = "detail";
+  split.appendChild(detailPane);
+  MAIN().appendChild(split);
+  paintStatus(items.length, data.count);
+}
+
+async function viewKeywords() {
+  MAIN().innerHTML = "";
+  const wrap = el("div", "viz");
+  wrap.appendChild(el("h3", "", "Keyword list"));
+  const lede = el("p", "muted",
+    "Paste terms (one per line) or load a text file. ARGUS searches the same full-text index as the query box and ranks matches.");
+  wrap.appendChild(lede);
+  const ta = el("textarea");
+  ta.id = "kwText";
+  ta.placeholder = "cash\nmeet tonight\n+9198…";
+  ta.style.cssText = "width:100%;min-height:140px;margin:8px 0";
+  wrap.appendChild(ta);
+  const row = el("div");
+  row.style.cssText = "display:flex;gap:8px;align-items:center;flex-wrap:wrap;margin-bottom:12px";
+  const file = document.createElement("input");
+  file.type = "file"; file.accept = ".txt,.csv,.lst";
+  file.onchange = () => {
+    const f = file.files && file.files[0];
+    if (!f) return;
+    const r = new FileReader();
+    r.onload = () => { ta.value = String(r.result || ""); };
+    r.readAsText(f);
+  };
+  const run = el("button", "btn primary", "Run list");
+  row.appendChild(file);
+  row.appendChild(run);
+  wrap.appendChild(row);
+  const out = el("div"); out.id = "kwOut";
+  wrap.appendChild(out);
+  MAIN().appendChild(wrap);
+  run.onclick = async () => {
+    out.innerHTML = "";
+    out.appendChild(el("div", "muted", "Searching…"));
+    try {
+      const data = await post("keywords", { text: ta.value, per_term: 12 });
+      out.innerHTML = "";
+      out.appendChild(el("p", "muted",
+        (data.matched || 0) + " of " + (data.terms || 0) + " terms matched"));
+      (data.hits || []).forEach(h => {
+        const card = el("div", "card");
+        card.style.marginBottom = "10px";
+        const title = el("button", "", h.term + "  —  " + (h.total || 0) + " hit(s)");
+        title.style.color = h.total ? "var(--accent)" : "var(--ink-faint)";
+        title.onclick = () => {
+          S.q = h.query || ('"' + h.term + '"');
+          $("#q").value = S.q;
+          go("timeline");
+        };
+        card.appendChild(title);
+        (h.samples || []).slice(0, 4).forEach(s => {
+          card.appendChild(el("div", "muted",
+            (s.timestamp_iso || "").slice(0, 19) + "  " + (s.body || "").slice(0, 120)));
+        });
+        out.appendChild(card);
+      });
+    } catch (e) {
+      out.innerHTML = "";
+      out.appendChild(el("div", "", String(e.message || e)));
+    }
+  };
+}
+
+async function viewColumn(category, opts) {
+  opts = opts || {};
+  if (opts.reset) S.tableOffset = 0;
+  loading("Loading " + category + "…");
+  const offset = S.tableOffset || 0;
+  const limit = S.tableLimit || 500;
+  const res = await api("column", { category, limit, offset });
+  S.rows = res.rows || [];
+  S.tableTotal = res.total || res.count || 0;
+  S.tableOffset = res.offset || offset;
+  S.columnMeta = { category, columns: res.columns || [] };
+
+  MAIN().innerHTML = "";
+  const split = el("div", "split" + (S.detail ? " detail" : ""));
+  const listPane = el("div"); listPane.id = "list";
+  listPane.appendChild(columnTable(res.columns || [], S.rows));
+  listPane.appendChild(tablePager({ column: category }));
+  split.appendChild(listPane);
+  const detailPane = el("div"); detailPane.id = "detail";
+  split.appendChild(detailPane);
+  MAIN().appendChild(split);
+  paintStatus(S.rows.length, S.tableTotal);
+}
+
+function columnTable(columns, rows) {
+  if (!rows.length) {
+    const d = el("div", "empty");
+    d.appendChild(el("div", "big", "No records"));
+    return d;
+  }
+  const t = el("table");
+  const hr = el("tr");
+  columns.forEach(h => hr.appendChild(el("th", "", h)));
+  t.appendChild(el("thead")).appendChild(hr);
+  const tb = el("tbody");
+  rows.forEach((row, i) => {
+    const tr = el("tr");
+    tr.dataset.i = i;
+    columns.forEach(h => {
+      const val = row[h];
+      tr.appendChild(el("td", h === "Message" || h === "Summary" ? "body" : "",
+        val == null ? "" : String(val)));
+    });
+    tr.onclick = () => {
+      if (row.artifact_id) showDetail(row.artifact_id);
+    };
+    tb.appendChild(tr);
+  });
+  t.appendChild(tb);
+  return t;
+}
+
+function rowsTable(rows) {
+  if (!rows.length) {
+    const d = el("div", "empty");
+    d.appendChild(el("div", "big", "No matching records"));
+    d.appendChild(el("div", "",
+      "The query ran successfully and returned nothing."));
+    return d;
+  }
+  const t = el("table");
+  const thead = el("thead");
+  const hr = el("tr");
+  ["", "When", "Category", "App", "Parties", "Content", "Conf"]
+    .forEach(h => hr.appendChild(el("th", "", h)));
+  thead.appendChild(hr); t.appendChild(thead);
+
+  const tb = el("tbody");
+  rows.forEach((r, i) => {
+    const tr = el("tr");
+    tr.dataset.i = i;
+
+    const flags = el("td");
+    flagNodes(r).forEach(n => { flags.appendChild(n);
+                                flags.appendChild(document.createTextNode(" ")); });
+    tr.appendChild(flags);
+
+    tr.appendChild(el("td", "ts", r.timestamp_iso || "—"));
+    tr.appendChild(el("td", "", r.subtype || r.category || ""));
+    tr.appendChild(el("td", "muted", r.app || ""));
+
+    const parties = (r.parties || [])
+      .map(p => p.label + (p.is_owner ? " (owner)" : "")).join(", ");
+    tr.appendChild(el("td", "muted", parties));
+
+    tr.appendChild(el("td", "body", r.body || ""));
+
+    const c = el("td");
+    c.appendChild(confNode(r.confidence));
+    tr.appendChild(c);
+
+    tr.onclick = () => select(i);
+    tb.appendChild(tr);
+  });
+  t.appendChild(tb);
+  return t;
+}
+
+/* Provenance flags belong in the list, not only in the detail pane. An
+   examiner scanning 400 rows needs to see which ones are carved, partial, or
+   sourced from a notification preview of an encrypted app — those change how
+   the row should be read, and hiding them one click away means they are
+   routinely missed. */
+function flagNodes(r) {
+  const out = [];
+  const a = r.attributes || {};
+  if (r.is_deleted) {
+    const rec = (r.recovery || "").toLowerCase();
+    out.push(el("span", "pill " + (rec.indexOf("carv") >= 0 ? "carve" : "del"),
+                rec.indexOf("carv") >= 0 ? "carved" : "deleted"));
+  }
+  if (a.partial_record) out.push(el("span", "pill part", "partial"));
+  if (a.previews_encrypted_app)
+    out.push(el("span", "pill enc", "preview of encrypted app"));
+  if (a.encrypted) out.push(el("span", "pill enc", "encrypted"));
+  if (a.extension_mismatch) out.push(el("span", "pill warnflag", "renamed"));
+  if (a.concealed) out.push(el("span", "pill warnflag", "concealed"));
+  if (a.content_recovered) out.push(el("span", "pill part", "reconstructed"));
+  return out;
+}
+
+function confNode(v) {
+  const n = v == null ? 1 : Number(v);
+  const w = el("span", "conf" + (n < 0.5 ? " low" : n < 0.8 ? " mid" : ""));
+  w.title = "confidence " + n.toFixed(2);
+  const i = el("i"); i.style.width = Math.max(2, n * 34) + "px";
+  w.appendChild(i); return w;
+}
+
+function renderFacets(pane, facets) {
+  pane.innerHTML = "";
+  if (!facets) {
+    pane.appendChild(el("div", "facetgroup muted", "Facets unavailable"));
+    return;
+  }
+  const groups = [["category", "Category"], ["app", "Application"],
+                  ["recovery", "Recovery"], ["direction", "Direction"]];
+  for (const [field, label] of groups) {
+    const counts = facets[field] || {};
+    const entries = Object.entries(counts).sort((a, b) => b[1] - a[1]);
+    if (!entries.length) continue;
+    const g = el("div", "facetgroup");
+    g.appendChild(el("h4", "", label));
+    const max = entries[0][1] || 1;
+    for (const [value, n] of entries.slice(0, 12)) {
+      const on = S.facets[field] && S.facets[field].has(value);
+      const b = el("button", "facet" + (on ? " on" : ""));
+      b.appendChild(el("span", "", value || "(none)"));
+      b.appendChild(el("span", "c", String(n)));
+      const bar = el("span", "bar");
+      bar.style.width = Math.round((n / max) * 100) + "%";
+      bar.style.bottom = "0";
+      b.style.position = "relative";
+      b.appendChild(bar);
+      b.onclick = () => {
+        S.facets[field] = S.facets[field] || new Set();
+        if (S.facets[field].has(value)) S.facets[field].delete(value);
+        else S.facets[field].add(value);
+        if (!S.facets[field].size) delete S.facets[field];
+        render();
+      };
+      g.appendChild(b);
+    }
+    pane.appendChild(g);
+  }
+  const note = el("div", "facetgroup muted");
+  note.style.fontSize = "11px";
+  note.textContent = facets.note || "";
+  pane.appendChild(note);
+}
+
+/* ────────────────────────────────────────────────────────────── scrubber */
+function scrubber() {
+  const wrap = el("div"); wrap.id = "scrub";
+  const cv = el("canvas");
+  wrap.appendChild(cv);
+  const lbl = el("div", "lbl", "");
+  wrap.appendChild(lbl);
+
+  const rows = S.rows.filter(r => r.timestamp);
+  requestAnimationFrame(() => {
+    const w = wrap.clientWidth || 900, h = wrap.clientHeight || 56;
+    cv.width = w * devicePixelRatio; cv.height = h * devicePixelRatio;
+    const g = cv.getContext("2d");
+    g.scale(devicePixelRatio, devicePixelRatio);
+    if (!rows.length) {
+      lbl.textContent = "no timestamped records in this result set";
+      return;
+    }
+    const lo = Math.min(...rows.map(r => r.timestamp));
+    const hi = Math.max(...rows.map(r => r.timestamp));
+    const bins = Math.max(40, Math.floor(w / 4));
+    const hist = new Array(bins).fill(0);
+    const span = Math.max(1, hi - lo);
+    rows.forEach(r => {
+      const b = Math.min(bins - 1,
+                Math.floor(((r.timestamp - lo) / span) * bins));
+      hist[b]++;
+    });
+    const peak = Math.max(...hist, 1);
+    const bw = w / bins;
+    hist.forEach((n, i) => {
+      if (!n) return;
+      const bh = Math.max(1, (n / peak) * (h - 16));
+      g.fillStyle = "#2c5c99";
+      g.fillRect(i * bw, h - 12 - bh, Math.max(1, bw - 0.5), bh);
+    });
+    g.strokeStyle = "#252d38"; g.beginPath();
+    g.moveTo(0, h - 12); g.lineTo(w, h - 12); g.stroke();
+    lbl.textContent = fmtRange(lo, hi) + "  ·  " + rows.length +
+                      " timestamped of " + S.rows.length;
+
+    // Drag to constrain the query to a span.
+    let anchor = null, box = null;
+    wrap.onmousedown = ev => {
+      anchor = ev.offsetX;
+      box = el("div", "sel"); box.style.left = anchor + "px";
+      box.style.width = "0px"; wrap.appendChild(box);
+    };
+    wrap.onmousemove = ev => {
+      if (anchor == null || !box) return;
+      const x0 = Math.min(anchor, ev.offsetX), x1 = Math.max(anchor, ev.offsetX);
+      box.style.left = x0 + "px"; box.style.width = (x1 - x0) + "px";
+    };
+    const finish = ev => {
+      if (anchor == null) return;
+      const x0 = Math.min(anchor, ev.offsetX), x1 = Math.max(anchor, ev.offsetX);
+      anchor = null;
+      if (x1 - x0 < 4) {                     // a click clears the constraint
+        S.span = null; render(); return;
+      }
+      S.span = [Math.round(lo + (x0 / w) * span),
+                Math.round(lo + (x1 / w) * span)];
+      render();
+    };
+    wrap.onmouseup = finish;
+    wrap.onmouseleave = () => { anchor = null; };
+  });
+  return wrap;
+}
+
+function fmtRange(lo, hi) {
+  const d = t => new Date(t / 1000).toISOString().slice(0, 16).replace("T", " ");
+  return d(lo) + "  →  " + d(hi);
+}
+
+/* ───────────────────────────────────────────────────────────────── detail */
+function select(i) {
+  S.sel = i;
+  document.querySelectorAll("#list tbody tr")
+    .forEach(tr => tr.classList.toggle("sel", Number(tr.dataset.i) === i));
+  const row = S.rows[i];
+  if (!row) return;
+  S.detail = true;
+  const split = $(".split");
+  if (split) split.classList.add("detail");
+  showDetail(row.artifact_id || row.id);
+}
+
+async function showDetail(id) {
+  const pane = $("#detail");
+  if (!pane) return;
+  pane.innerHTML = "";
+  pane.appendChild(el("div", "dsec muted", "Loading…"));
+  let d;
+  try { d = await api("artifact", { id }); }
+  catch (e) { pane.innerHTML = ""; pane.appendChild(
+      el("div", "dsec", "Could not load: " + e.message)); return; }
+
+  pane.innerHTML = "";
+  const head = el("div", "dsec");
+  const h = el("h4", "", d.subtype || d.category || "Artifact");
+  head.appendChild(h);
+  const fl = el("div");
+  flagNodes(d).forEach(n => { fl.appendChild(n);
+                              fl.appendChild(document.createTextNode(" ")); });
+  head.appendChild(fl);
+  if (d.body) {
+    const b = el("div"); b.style.marginTop = "8px";
+    b.style.whiteSpace = "pre-wrap"; b.textContent = d.body;
+    head.appendChild(b);
+  }
+  pane.appendChild(head);
+
+  const facts = el("div", "dsec");
+  facts.appendChild(el("h4", "", "Record"));
+  [["When", d.timestamp_iso], ["App", d.app], ["Direction", d.direction],
+   ["Recovery", d.recovery],
+   ["Confidence", d.confidence != null ? Number(d.confidence).toFixed(2) : ""],
+  ].forEach(([k, v]) => { if (!v) return;
+    const r = el("div", "drow"); r.appendChild(el("b", "", k));
+    r.appendChild(el("span", "", v)); facts.appendChild(r); });
+  pane.appendChild(facts);
+
+  if ((d.parties || []).length) {
+    const p = el("div", "dsec");
+    p.appendChild(el("h4", "", "Parties"));
+    d.parties.forEach(x => {
+      const r = el("div", "drow");
+      r.appendChild(el("b", "", x.role || "party"));
+      r.appendChild(el("span", "",
+        x.label + (x.is_owner ? "  (device owner)" : "")));
+      p.appendChild(r);
+    });
+    pane.appendChild(p);
+  }
+
+  /* Provenance is not an appendix. Where a record came from, and by what
+     method, is what makes it defensible — so it gets its own section rather
+     than being buried in a generic attribute dump. */
+  const prov = el("div", "dsec");
+  prov.appendChild(el("h4", "", "Provenance"));
+  [["Source file", d.source_path], ["Table", d.source_table],
+   ["Row", d.source_row], ["SHA-256", d.blob_sha256],
+   ["Method", (d.attributes || {}).extraction_method],
+  ].forEach(([k, v]) => { if (v == null || v === "") return;
+    const r = el("div", "drow"); r.appendChild(el("b", "", k));
+    const s = el("span", "mono", String(v)); r.appendChild(s);
+    prov.appendChild(r); });
+  const note = (d.attributes || {}).note;
+  if (note) {
+    const n = el("div", "muted"); n.style.marginTop = "7px";
+    n.style.fontSize = "11px"; n.textContent = note;
+    prov.appendChild(n);
+  }
+  pane.appendChild(prov);
+
+  const attrs = Object.entries(d.attributes || {})
+    .filter(([k]) => k !== "extraction_method" && k !== "note");
+  if (attrs.length) {
+    const a = el("div", "dsec");
+    a.appendChild(el("h4", "", "Attributes"));
+    attrs.forEach(([k, v]) => {
+      const r = el("div", "drow");
+      r.appendChild(el("b", "", k));
+      r.appendChild(el("span", "mono",
+        typeof v === "object" ? JSON.stringify(v) : String(v)));
+      a.appendChild(r);
+    });
+    pane.appendChild(a);
+  }
+
+  if (d.blob_sha256) {
+    const mime = (d.attributes || {}).mime_type || "";
+    const m = el("div", "dsec");
+    m.appendChild(el("h4", "", "Media"));
+    if (/video/i.test(mime)) {
+      const vid = el("video");
+      vid.controls = true;
+      vid.src = blobUrl(d.blob_sha256);
+      vid.style.maxWidth = "100%";
+      vid.style.borderRadius = "6px";
+      m.appendChild(vid);
+    } else if (/image/i.test(mime)) {
+      const img = el("img");
+      img.src = blobUrl(d.blob_sha256);
+      img.style.maxWidth = "100%"; img.style.borderRadius = "6px";
+      m.appendChild(img);
+    } else {
+      const link = el("a", "", "Download attachment");
+      link.href = blobUrl(d.blob_sha256);
+      link.target = "_blank";
+      m.appendChild(link);
+    }
+    pane.appendChild(m);
+    if (!/video|image/i.test(mime)) {
+      const hx = el("div");
+      hx.className = "muted";
+      hx.textContent = "Loading hex…";
+      m.appendChild(hx);
+      api("hex", { sha: d.blob_sha256, length: 2048 }).then(prev => {
+        hx.innerHTML = "";
+        hx.appendChild(hexBlock(prev));
+      }).catch(() => { hx.textContent = ""; });
+    }
+  }
+
+  const tagSec = el("div", "dsec");
+  tagSec.appendChild(el("h4", "", "Analyst tags"));
+  const existing = (d.tags || []).map(t =>
+    `<span class="pill" style="margin-right:6px">${esc(t.name || t)}</span>`).join("")
+    || `<span class="muted">No tags yet</span>`;
+  tagSec.innerHTML += `<div style="margin:8px 0">${existing}</div>
+    <div style="display:flex;gap:8px;flex-wrap:wrap">
+      <input id="tagName" placeholder="Tag name (e.g. Key evidence)" style="flex:1;min-width:140px">
+      <input id="tagNote" placeholder="Note (optional)" style="flex:1;min-width:140px">
+      <button class="btn primary" id="tagSave">Save tag</button>
+      <button class="btn" id="tagFlag">Flag as key evidence</button>
+    </div>
+    <div id="tagMsg" class="muted" style="margin-top:6px;font-size:11px"></div>`;
+  pane.appendChild(tagSec);
+  $("#tagSave").onclick = async () => {
+    const name = $("#tagName").value.trim();
+    if (!name) return;
+    $("#tagMsg").textContent = "Saving…";
+    try {
+      await post("tag", { artifact_id: d.artifact_id, name,
+        note: $("#tagNote").value.trim(), colour: "#e2b33c", actor: "analyst" });
+      $("#tagMsg").textContent = "Tag saved — filter with tag:" + name;
+      showDetail(d.artifact_id);
+    } catch (e) { $("#tagMsg").textContent = e.message; }
+  };
+  $("#tagFlag").onclick = async () => {
+    $("#tagMsg").textContent = "Saving…";
+    try {
+      await post("tag", { artifact_id: d.artifact_id, name: "key-evidence",
+        note: $("#tagNote").value.trim(), colour: "#e5534b", actor: "analyst" });
+      $("#tagMsg").textContent = "Flagged — open Project to review";
+      showDetail(d.artifact_id);
+    } catch (e) { $("#tagMsg").textContent = e.message; }
+  };
+}
+
+/* ──────────────────────────────────────────────────────────────── gallery */
+async function viewMedia() {
+  loading("Loading media…");
+  const g = await api("gallery", { limit: 400 });
+  const items = g.items || [];
+  MAIN().innerHTML = "";
+  if (!items.length) return emptyState("No media",
+    "No image or video artifacts in this container.");
+  const wrap = el("div", "tiles");
+  items.forEach(it => {
+    const t = el("div", "tile");
+    if (it.blob_sha256) {
+      const img = el("img");
+      img.loading = "lazy";
+      img.src = blobUrl(it.blob_sha256);
+      t.appendChild(img);
+    }
+    const a = it.attributes || {};
+    const cap = [a.filename || "", a.has_gps ? "GPS" : "",
+                 it.is_deleted ? "deleted" : ""].filter(Boolean).join(" · ");
+    t.appendChild(el("div", "cap", cap || (it.subtype || "")));
+    t.onclick = () => { S.detail = true; showDetailStandalone(it.artifact_id); };
+    wrap.appendChild(t);
+  });
+  MAIN().appendChild(wrap);
+  paintStatus(items.length);
+}
+
+function showDetailStandalone(id) {
+  let pane = $("#detail");
+  if (!pane) {
+    const split = el("div", "split detail nofacet");
+    const host = el("div"); host.id = "list";
+    host.appendChild(MAIN().firstChild);
+    split.appendChild(el("div"));
+    split.appendChild(host);
+    pane = el("div"); pane.id = "detail";
+    split.appendChild(pane);
+    MAIN().appendChild(split);
+  }
+  showDetail(id);
+}
+
+/* ─────────────────────────────────────────────────────────── conversations */
+async function viewConversations() {
+  loading("Reconstructing conversations…");
+  const data = await api("conversations");
+  const convs = data.conversations || [];
+  MAIN().innerHTML = "";
+  if (!convs.length) return emptyState("No conversations reconstructed",
+    data.note || "Not enough threaded material to rebuild an exchange.");
+
+  const split = el("div", "split");
+  split.style.gridTemplateColumns = "280px 1fr 0";
+  const list = el("div"); list.id = "facets";
+  const body = el("div"); body.id = "list";
+
+  convs.forEach((c, i) => {
+    const b = el("button", "facet");
+    b.style.padding = "9px 12px";
+    b.style.borderBottom = "1px solid var(--line)";
+    b.style.display = "block"; b.style.textAlign = "left";
+    const t = el("div", "", c.label || c.title || c.key || "Thread");
+    const s = el("div", "muted");
+    s.style.fontSize = "11px";
+    s.textContent = ((c.turn_count || (c.turns || []).length) || 0) +
+      " turns · " + ((c.channels || [c.app]).filter(Boolean).join(", "));
+    b.appendChild(t); b.appendChild(s);
+    b.onclick = () => paintTurns(body, c);
+    list.appendChild(b);
+  });
+
+  split.appendChild(list); split.appendChild(body);
+  split.appendChild(el("div"));
+  MAIN().appendChild(split);
+  paintTurns(body, convs[0]);
+  paintStatus(convs.length);
+}
+
+function paintTurns(host, c) {
+  host.innerHTML = "";
+  const wrap = el("div", "turns");
+  (c.turns || []).forEach(t => {
+    const d = el("div", "turn" + (t.is_owner || t.direction === "outgoing"
+                                  ? " out" : ""));
+    d.appendChild(el("div", "", t.body || t.text || ""));
+    const m = el("div", "meta",
+      [t.timestamp_iso || "", t.channel || "", t.is_deleted ? "deleted" : ""]
+        .filter(Boolean).join("  ·  "));
+    d.appendChild(m);
+    wrap.appendChild(d);
+  });
+  host.appendChild(wrap);
+}
+
+/* ─────────────────────────────────────────────────────────────── entities */
+async function viewEntities() {
+  loading("Validating entities…");
+  const data = await api("entities");
+  MAIN().innerHTML = "";
+  const g = el("div", "grid");
+  const byKind = data.by_kind || {};
+  const types = Object.entries(byKind).filter(([, n]) => n);
+  if (!types.length) return emptyState("No validated entities",
+    "Nothing passed checksum validation. Candidates that fail their check " +
+    "are discarded rather than reported with a caveat.");
+  types.sort((a, b) => b[1] - a[1]);
+  const summary = el("div", "card wide");
+  summary.appendChild(el("h3", "",
+    (data.total_entities || 0) + " validated entities"));
+  for (const [type, n] of types) {
+    const r = el("div", "kv");
+    r.appendChild(el("b", "", type));
+    r.appendChild(el("span", "mono", String(n)));
+    summary.appendChild(r);
+  }
+  summary.appendChild(el("div", "muted",
+    "Checksum-validated only. A candidate that fails its check is discarded " +
+    "rather than reported with a caveat."));
+  g.appendChild(summary);
+
+  const hv = data.high_value || [];
+  if (hv.length) {
+    const c = el("div", "card wide");
+    c.appendChild(el("h3", "", "High-value entities"));
+    hv.forEach(x => {
+      const r = el("div", "kv");
+      r.appendChild(el("b", "mono", x.value || x.identifier || String(x)));
+      r.appendChild(el("span", "muted", x.kind || x.type || ""));
+      c.appendChild(r);
+    });
+    g.appendChild(c);
+  }
+  MAIN().appendChild(g);
+}
+
+/* ─────────────────────────────────────────────────────────── chart helpers */
+function barPanel(title, series, labelKey) {
+  const card = el("div", "");
+  card.appendChild(el("h4", "", title));
+  card.style.fontSize = "11px";
+  const chart = el("div", "barchart");
+  const peak = Math.max(...series.map(x => x.count || x.pct || 0), 1);
+  series.forEach(item => {
+    const n = item.count || 0;
+    const h = Math.max(2, Math.round((n / peak) * 100));
+    const bar = el("div", "bar");
+    bar.style.height = h + "%";
+    bar.title = `${item[labelKey] || ""}: ${n}`;
+    const lbl = el("span", "", String(item[labelKey] || "").slice(-2));
+    bar.appendChild(lbl);
+    chart.appendChild(bar);
+  });
+  card.appendChild(chart);
+  return card;
+}
+
+function hbarCard(title, series, onClick, colourFn) {
+  const card = el("div", "card");
+  card.appendChild(el("h3", "", title));
+  if (!series.length) {
+    card.appendChild(el("div", "muted", "No data."));
+    return card;
+  }
+  const peak = Math.max(...series.map(x => x.count || 0), 1);
+  const box = el("div", "hbar");
+  series.slice(0, 12).forEach(item => {
+    const row = el("div", "hrow");
+    row.title = (item.label || "") + ": " + item.count;
+    row.appendChild(el("span", "hlbl", item.label || ""));
+    const track = el("div", "htrack");
+    const fill = el("div", "hfill");
+    fill.style.width = Math.max(2, Math.round(100 * (item.count || 0) / peak)) + "%";
+    fill.style.background = (colourFn && colourFn(item.label)) || "var(--accent)";
+    track.appendChild(fill);
+    row.appendChild(track);
+    row.appendChild(el("span", "hn", String(item.count)));
+    if (onClick) row.onclick = () => onClick(item);
+    box.appendChild(row);
+  });
+  card.appendChild(box);
+  return card;
+}
+
+function donutCard(title, series, colours) {
+  const card = el("div", "card");
+  card.appendChild(el("h3", "", title));
+  const wrap = el("div", "donut");
+  const cv = el("canvas");
+  cv.width = 108; cv.height = 108;
+  cv.style.width = "108px"; cv.style.height = "108px";
+  wrap.appendChild(cv);
+  const leg = el("div", "leg");
+  const total = series.reduce((a, x) => a + (x.count || 0), 0) || 1;
+  const g = cv.getContext("2d");
+  let a0 = -Math.PI / 2;
+  const cx = 54, cy = 54, r = 40, ri = 24;
+  if (!series.length) {
+    g.strokeStyle = "#1c232c"; g.lineWidth = 16;
+    g.beginPath(); g.arc(cx, cy, r, 0, Math.PI * 2); g.stroke();
+    wrap.appendChild(el("div", "muted", "No data."));
+    card.appendChild(wrap);
+    return card;
+  }
+  series.forEach((item, i) => {
+    const frac = (item.count || 0) / total;
+    const a1 = a0 + frac * Math.PI * 2;
+    g.beginPath();
+    g.arc(cx, cy, r, a0, a1);
+    g.arc(cx, cy, ri, a1, a0, true);
+    g.closePath();
+    const key = String(item.label || "").toLowerCase();
+    g.fillStyle = (colours && (colours[item.label] || colours[key]))
+      || ["#4c9aff", "#3fb950", "#a371f7", "#e2b33c", "#f778ba"][i % 5];
+    g.fill();
+    a0 = a1;
+    const kv = el("div", "kv");
+    kv.appendChild(el("b", "", item.label || "(n/a)"));
+    kv.appendChild(el("span", "mono", String(item.count)));
+    leg.appendChild(kv);
+  });
+  g.fillStyle = "#dfe6ef";
+  g.font = "600 13px sans-serif";
+  g.textAlign = "center"; g.textBaseline = "middle";
+  g.fillText(String(series.reduce((a, x) => a + (x.count || 0), 0)), cx, cy - 6);
+  g.fillStyle = "#6b7889";
+  g.font = "9px sans-serif";
+  g.fillText("total", cx, cy + 8);
+  wrap.appendChild(leg);
+  card.appendChild(wrap);
+  return card;
+}
+
+function heatStrip(hourly) {
+  const wrap = el("div");
+  wrap.appendChild(el("h4", "", "Hour-of-day heat"));
+  const row = el("div", "heat24");
+  const peak = Math.max(...hourly.map(x => x.count || 0), 1);
+  for (let h = 0; h < 24; h++) {
+    const hit = hourly.find(x => String(x.label || "").startsWith(String(h).padStart(2, "0")));
+    const n = hit ? hit.count : 0;
+    const cell = el("i");
+    const t = n / peak;
+    cell.style.background = "rgba(76,154,255," + (0.12 + 0.88 * t) + ")";
+    cell.title = String(h).padStart(2, "0") + ":00 — " + n;
+    row.appendChild(cell);
+  }
+  wrap.appendChild(row);
+  const lbl = el("div", "heatlbl");
+  lbl.appendChild(el("span", "", "00"));
+  lbl.appendChild(el("span", "", "12"));
+  lbl.appendChild(el("span", "", "23"));
+  wrap.appendChild(lbl);
+  return wrap;
+}
+
+function sparkline(daily) {
+  const row = el("div", "spark");
+  const peak = Math.max(...daily.map(d => d.count || 0), 1);
+  daily.forEach(d => {
+    const b = el("b");
+    b.style.height = Math.max(2, Math.round(100 * (d.count || 0) / peak)) + "%";
+    b.title = (d.date || d.label || "") + ": " + d.count;
+    row.appendChild(b);
+  });
+  return row;
+}
+
+function contactsVizCard(ct) {
+  const card = el("div", "card span2");
+  card.appendChild(el("h3", "", "Contacts"));
+  const stats = el("div");
+  stats.style.cssText = "display:flex;gap:18px;flex-wrap:wrap;margin-bottom:10px";
+  [["Address book", ct.book || 0],
+   ["Active correspondents", Math.max(0, (ct.active || 0) - 1)],
+   ["Links", ct.edge_count || 0]].forEach(([k, n]) => {
+    const box = el("div");
+    box.appendChild(el("div", "muted", k));
+    box.appendChild(el("div", "big", String(n)));
+    stats.appendChild(box);
+  });
+  card.appendChild(stats);
+  const top = ct.top || [];
+  if (!top.length) {
+    card.appendChild(el("div", "muted",
+      "No correspondents ranked yet. Open Contacts for the address book."));
+  } else {
+    card.appendChild(el("h4", "", "Most frequent correspondents"));
+    const peak = Math.max(...top.map(c => c.artifact_count || 0), 1);
+    const box = el("div", "hbar");
+    top.slice(0, 12).forEach(c => {
+      const row = el("div", "hrow");
+      const name = c.label || c.key || "unknown";
+      row.title = name + " — " + (c.artifact_count || 0) + " artifacts"
+        + (c.calls ? " · " + c.calls + " calls" : "")
+        + (c.messages ? " · " + c.messages + " messages" : "");
+      row.appendChild(el("span", "hlbl", name));
+      const track = el("div", "htrack");
+      const fill = el("div", "hfill");
+      fill.style.width = Math.max(2, Math.round(100 * (c.artifact_count || 0) / peak)) + "%";
+      fill.style.background = "#a371f7";
+      track.appendChild(fill);
+      row.appendChild(track);
+      row.appendChild(el("span", "hn", String(c.artifact_count || 0)));
+      row.onclick = () => {
+        const id = (c.identifiers && c.identifiers[0]) || c.key || name;
+        S.q = 'party:"' + String(id).replace(/"/g, "") + '"';
+        $("#q").value = S.q; go("timeline");
+      };
+      box.appendChild(row);
+    });
+    card.appendChild(box);
+  }
+  if ((ct.one_way || []).length) {
+    card.appendChild(el("div", "muted",
+      (ct.one_way || []).length + " one-way relationship(s) — often bots or blocked numbers."));
+  }
+  const btns = el("div");
+  btns.style.marginTop = "10px";
+  const b1 = el("button", "btn", "Address book");
+  b1.onclick = () => go("contacts");
+  const b2 = el("button", "btn", "Connection graph");
+  b2.style.marginLeft = "6px"; b2.onclick = () => go("graph");
+  btns.appendChild(b1); btns.appendChild(b2);
+  card.appendChild(btns);
+  return card;
+}
+
+function drawMiniNet(canvas, nodes, links) {
+  const wrap = canvas.parentElement;
+  const w = wrap.clientWidth || 640, h = 260;
+  canvas.width = w * devicePixelRatio;
+  canvas.height = h * devicePixelRatio;
+  canvas.style.width = w + "px";
+  const g = canvas.getContext("2d");
+  g.setTransform(devicePixelRatio, 0, 0, devicePixelRatio, 0, 0);
+  g.clearRect(0, 0, w, h);
+  const N = nodes.length;
+  if (!N) return;
+  const nodeKey = n => n.key || n.id || n.label;
+  const P = nodes.map((n, i) => ({
+    x: w / 2 + Math.cos(2 * Math.PI * i / N) * Math.min(w, h) * 0.36,
+    y: h / 2 + Math.sin(2 * Math.PI * i / N) * Math.min(w, h) * 0.36,
+    n,
+  }));
+  const idx = new Map(nodes.map((n, i) => [nodeKey(n), i]));
+  for (let pass = 0; pass < 80; pass++) {
+    for (const L of links) {
+      const a = idx.get(L.source ?? L.from), b = idx.get(L.target ?? L.to);
+      if (a == null || b == null) continue;
+      const dx = P[b].x - P[a].x, dy = P[b].y - P[a].y;
+      const f = 0.004 * (L.artifact_count || L.weight || 1);
+      P[a].x += dx * f; P[a].y += dy * f;
+      P[b].x -= dx * f; P[b].y -= dy * f;
+    }
+    for (let i = 0; i < N; i++) for (let j = i + 1; j < N; j++) {
+      const dx = P[j].x - P[i].x, dy = P[j].y - P[i].y;
+      const d2 = dx * dx + dy * dy || 1;
+      if (d2 > 18000) continue;
+      const f = 180 / d2;
+      P[i].x -= dx * f; P[i].y -= dy * f;
+      P[j].x += dx * f; P[j].y += dy * f;
+    }
+    for (const p of P) {
+      p.x = Math.max(16, Math.min(w - 16, p.x));
+      p.y = Math.max(16, Math.min(h - 16, p.y));
+    }
+  }
+  const maxC = Math.max(...nodes.map(n => n.artifact_count || 1), 1);
+  g.strokeStyle = "rgba(76,154,255,.35)";
+  g.lineWidth = 1;
+  for (const L of links) {
+    const a = idx.get(L.source ?? L.from), b = idx.get(L.target ?? L.to);
+    if (a == null || b == null) continue;
+    g.beginPath(); g.moveTo(P[a].x, P[a].y); g.lineTo(P[b].x, P[b].y); g.stroke();
+  }
+  P.forEach(p => {
+    const r = 4 + 10 * Math.sqrt((p.n.artifact_count || 1) / maxC);
+    g.beginPath(); g.arc(p.x, p.y, r + 4, 0, Math.PI * 2);
+    g.fillStyle = p.n.is_owner ? "rgba(226,179,60,.18)" : "rgba(163,113,247,.18)";
+    g.fill();
+    g.beginPath(); g.arc(p.x, p.y, r, 0, Math.PI * 2);
+    g.fillStyle = p.n.is_owner ? "#e2b33c" : "#a371f7";
+    g.fill();
+  });
+  const labelled = P.slice().sort((a, b) =>
+    (b.n.artifact_count || 0) - (a.n.artifact_count || 0)).slice(0, 8);
+  g.fillStyle = "#93a1b3";
+  g.font = "10px sans-serif";
+  labelled.forEach(p => {
+    const name = (p.n.label || p.n.key || "").slice(0, 18);
+    g.fillText(name, Math.min(w - 70, p.x + 8), p.y - 8);
+  });
+}
+
+function sectionTitle(text) {
+  return el("div", "sect", text);
+}
+
+function addIf(wrap, series, node) {
+  if (series && series.length) wrap.appendChild(node);
+}
+
+function caseBanner(ov) {
+  const card = el("div", "card wide casebanner");
+  const dev = ov.device || {};
+  const left = el("div");
+  left.appendChild(el("h3", "", "Case / exhibit"));
+  const name = [dev.make, dev.model].filter(Boolean).join(" ") || "Unknown device";
+  left.appendChild(el("div", "dev", name));
+  left.appendChild(el("div", "muted",
+    (dev.os || "") + (dev.phone_number ? " · " + dev.phone_number : "")));
+  const mid = el("div");
+  mid.appendChild(el("h3", "", "Identifiers"));
+  [["Case", ov.case_id], ["Exhibit", ov.exhibit_id], ["IMEI", dev.imei],
+   ["Serial", dev.serial], ["ICCID", dev.iccid]].forEach(([k, v]) => {
+    if (!v) return;
+    const r = el("div", "kv");
+    r.appendChild(el("b", "", k));
+    r.appendChild(el("span", "mono", String(v)));
+    mid.appendChild(r);
+  });
+  const right = el("div");
+  right.appendChild(el("h3", "", "Extraction"));
+  [["Method", ov.method], ["Operator", ov.operator],
+   ["Span", ov.time_span], ["Seal", ov.encryption_level]].forEach(([k, v]) => {
+    if (!v) return;
+    const r = el("div", "kv");
+    r.appendChild(el("b", "", k));
+    r.appendChild(el("span", "", String(v)));
+    right.appendChild(r);
+  });
+  card.appendChild(left); card.appendChild(mid); card.appendChild(right);
+  return card;
+}
+
+function clockCard(charts) {
+  const card = el("div", "card span2");
+  card.appendChild(el("h3", "", "Activity clock"));
+  const cv = el("canvas", "clockcv");
+  card.appendChild(cv);
+  requestAnimationFrame(() => drawClock(cv, charts.hourly || []));
+  card.appendChild(el("div", "muted",
+    "24-hour polar clock of device activity. Night hours sit at the top. "
+    + "Beyond a weekday bar — this is how examiners see 'when', not just 'how many'."));
+  const go = el("button", "btn", "Open clock view");
+  go.style.marginTop = "8px"; go.onclick = () => goView("clock");
+  card.appendChild(go);
+  return card;
+}
+
+function goView(id) { go(id); }
+
+function commsMixCard(viz) {
+  const mix = el("div", "card");
+  mix.appendChild(el("h3", "", "Communications mix"));
+  const calls = viz.calls || 0, msgs = viz.messages || 0;
+  mix.appendChild(el("div", "big", (calls + msgs).toLocaleString()));
+  mix.appendChild(el("div", "muted",
+    calls.toLocaleString() + " calls · " + msgs.toLocaleString() + " messages"));
+  const bar = el("div", "mixbar");
+  const tot = Math.max(calls + msgs, 1);
+  const a = el("div"); a.style.cssText =
+    "width:" + (100 * calls / tot) + "%;background:#3fb950";
+  const b = el("div"); b.style.cssText =
+    "width:" + (100 * msgs / tot) + "%;background:#4c9aff";
+  bar.appendChild(a); bar.appendChild(b);
+  mix.appendChild(bar);
+  const goC = el("button", "btn", "Calls");
+  goC.onclick = () => go("calls");
+  const goM = el("button", "btn", "Messages");
+  goM.style.marginLeft = "6px"; goM.onclick = () => go("messages");
+  mix.appendChild(goC); mix.appendChild(goM);
+  return mix;
+}
+
+function networkCard(ct) {
+  const net = el("div", "card span2");
+  net.appendChild(el("h3", "", "Contact network"));
+  if ((ct.nodes || []).length) {
+    const cv = el("canvas", "netmini");
+    net.appendChild(cv);
+    requestAnimationFrame(() => drawMiniNet(cv, ct.nodes, ct.links || []));
+    cv.onclick = () => go("graph");
+    net.appendChild(el("div", "muted",
+      "Gold is the device owner. Size is traffic. Click for the full graph."));
+  } else {
+    net.appendChild(el("div", "muted",
+      "No communication graph yet — extract calls or messages first."));
+  }
+  return net;
+}
+
+function placesCard(viz) {
+  const card = el("div", "card wide");
+  card.appendChild(el("h3", "", "Locations"));
+  const kpis = el("div", "kpirow");
+  [["Geolocated", viz.geolocated || 0],
+   ["Place records", viz.places || 0],
+   ["Clusters", (viz.geo_clusters || []).length]].forEach(([k, n]) => {
+    const box = el("div", "k");
+    box.appendChild(el("div", "muted", k));
+    box.appendChild(el("div", "big", String(n)));
+    kpis.appendChild(box);
+  });
+  card.appendChild(kpis);
+  const clusters = viz.geo_clusters || [];
+  if (clusters.length) {
+    const cv = el("canvas", "dashmap");
+    card.appendChild(cv);
+    requestAnimationFrame(() => drawMiniMap(cv, clusters, viz.geo_bounds || {}));
+    cv.onclick = () => go("places");
+    card.appendChild(el("div", "muted",
+      "Cluster size is visit density. Click to open the full map."));
+  } else {
+    card.appendChild(el("div", "muted", "No GPS coordinates in this extraction."));
+  }
+  const goP = el("button", "btn", "Open map");
+  goP.style.marginTop = "8px"; goP.onclick = () => go("places");
+  card.appendChild(goP);
+  return card;
+}
+
+function mediaCard(viz) {
+  const m = viz.media || {};
+  const card = el("div", "card");
+  card.appendChild(el("h3", "", "Files & media"));
+  card.appendChild(el("div", "big", String(m.total || 0)));
+  const geo = m.geotagged || 0;
+  const tot = Math.max(m.total || 0, 1);
+  card.appendChild(el("div", "muted",
+    geo + " geotagged · " + (m.with_blob || 0) + " hashed blobs"));
+  const bar = el("div", "mixbar");
+  const a = el("div"); a.style.cssText =
+    "width:" + (100 * geo / tot) + "%;background:#56d4dd";
+  const b = el("div"); b.style.cssText =
+    "width:" + (100 * ((m.total || 0) - geo) / tot) + "%;background:#e2b33c";
+  bar.appendChild(a); bar.appendChild(b);
+  card.appendChild(bar);
+  const types = m.by_type || [];
+  if (types.length) {
+    const peak = Math.max(...types.map(x => x.count || 0), 1);
+    const box = el("div", "hbar");
+    types.slice(0, 8).forEach(item => {
+      const row = el("div", "hrow");
+      row.appendChild(el("span", "hlbl", item.label));
+      const track = el("div", "htrack");
+      const fill = el("div", "hfill");
+      fill.style.width = Math.max(2, Math.round(100 * item.count / peak)) + "%";
+      fill.style.background = "#e2b33c";
+      track.appendChild(fill);
+      row.appendChild(track);
+      row.appendChild(el("span", "hn", String(item.count)));
+      box.appendChild(row);
+    });
+    card.appendChild(box);
+  }
+  const openMedia = el("button", "btn", "Open gallery");
+  openMedia.style.marginTop = "8px"; openMedia.onclick = () => go("media");
+  card.appendChild(openMedia);
+  return card;
+}
+
+function activityCard(viz, charts) {
+  const act = el("div", "card wide");
+  act.appendChild(el("h3", "", "Activity over time"));
+  const heat = charts.hour_weekday || [];
+  if (heat.length) {
+    const cv = el("canvas", "heathm");
+    act.appendChild(cv);
+    requestAnimationFrame(() => drawWeekHeat(cv, heat));
+  }
+  act.appendChild(heatStrip(charts.hourly || []));
+  const stacked = charts.stacked_daily || [];
+  if (stacked.length) {
+    act.appendChild(el("h4", "", "Category volume — last " + stacked.length + " days"));
+    const cv2 = el("canvas", "stackcv");
+    act.appendChild(cv2);
+    requestAnimationFrame(() =>
+      drawStacked(cv2, stacked, charts.stack_keys || []));
+    const leg = el("div", "legend-dots");
+    (charts.stack_keys || []).forEach(k => {
+      const s = el("span");
+      const i = el("i");
+      i.style.background = CAT_COL[k] || "#4c9aff";
+      s.appendChild(i);
+      s.appendChild(document.createTextNode(k));
+      leg.appendChild(s);
+    });
+    act.appendChild(leg);
+  }
+  const row = el("div");
+  row.style.cssText = "display:grid;grid-template-columns:1fr 1fr;gap:16px;margin-top:10px";
+  row.appendChild(barPanel("By hour", charts.hourly || [], "label"));
+  row.appendChild(barPanel("By weekday", charts.weekday || [], "label"));
+  act.appendChild(row);
+  const daily = charts.daily || [];
+  if (daily.length) {
+    act.appendChild(el("h4", "", "Daily volume"));
+    act.appendChild(sparkline(daily));
+  }
+  const meta = el("div", "muted");
+  meta.style.marginTop = "8px";
+  meta.textContent = `Night activity ${charts.night_activity_pct || 0}% · `
+    + `${charts.active_days || 0} active day(s) · peak hour `
+    + `${charts.peak_hour != null ? charts.peak_hour + ":00" : "—"}`;
+  act.appendChild(meta);
+  const goA = el("button", "btn", "Open full analytics");
+  goA.style.marginTop = "8px";
+  goA.onclick = () => go("analytics");
+  act.appendChild(goA);
+  return act;
+}
+
+function drawWeekHeat(canvas, grid) {
+  const wrap = canvas.parentElement;
+  const w = wrap.clientWidth || 720, h = 168;
+  canvas.width = w * devicePixelRatio;
+  canvas.height = h * devicePixelRatio;
+  canvas.style.width = w + "px";
+  const g = canvas.getContext("2d");
+  g.setTransform(devicePixelRatio, 0, 0, devicePixelRatio, 0, 0);
+  g.fillStyle = "#070b12";
+  g.fillRect(0, 0, w, h);
+  const days = ["Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat"];
+  const left = 36, top = 8, bottom = 18;
+  const cw = (w - left - 8) / 24, ch = (h - top - bottom) / 7;
+  let peak = 1;
+  for (let d = 0; d < 7; d++) for (let hr = 0; hr < 24; hr++)
+    peak = Math.max(peak, (grid[d] && grid[d][hr]) || 0);
+  g.font = "10px monospace";
+  g.textBaseline = "middle";
+  for (let d = 0; d < 7; d++) {
+    g.fillStyle = "#6b7889";
+    g.fillText(days[d], 4, top + d * ch + ch / 2);
+    for (let hr = 0; hr < 24; hr++) {
+      const n = (grid[d] && grid[d][hr]) || 0;
+      const t = n / peak;
+      g.fillStyle = n ? `rgba(76,154,255,${0.12 + 0.88 * t})` : "#121820";
+      const x = left + hr * cw, y = top + d * ch;
+      g.beginPath();
+      g.roundRect ? g.roundRect(x + 1, y + 1, cw - 2, ch - 2, 2)
+                  : g.rect(x + 1, y + 1, cw - 2, ch - 2);
+      g.fill();
+    }
+  }
+  g.fillStyle = "#6b7889";
+  g.textAlign = "center";
+  for (let hr = 0; hr < 24; hr += 3) {
+    g.fillText(String(hr).padStart(2, "0"), left + hr * cw + cw / 2, h - 8);
+  }
+}
+
+function drawMiniMap(canvas, clusters, bounds) {
+  const wrap = canvas.parentElement;
+  const w = wrap.clientWidth || 720, h = 240;
+  canvas.width = w * devicePixelRatio;
+  canvas.height = h * devicePixelRatio;
+  canvas.style.width = w + "px";
+  const g = canvas.getContext("2d");
+  g.setTransform(devicePixelRatio, 0, 0, devicePixelRatio, 0, 0);
+  g.fillStyle = "#070b12";
+  g.fillRect(0, 0, w, h);
+  g.strokeStyle = "#15202c";
+  g.lineWidth = 1;
+  for (let i = 1; i < 6; i++) {
+    g.beginPath(); g.moveTo(0, h * i / 6); g.lineTo(w, h * i / 6); g.stroke();
+    g.beginPath(); g.moveTo(w * i / 6, 0); g.lineTo(w * i / 6, h); g.stroke();
+  }
+  const pad = 22;
+  const minLat = bounds.min_lat, maxLat = bounds.max_lat;
+  const minLon = bounds.min_lon, maxLon = bounds.max_lon;
+  const dLat = Math.max((maxLat - minLat) || 0.01, 1e-5);
+  const dLon = Math.max((maxLon - minLon) || 0.01, 1e-5);
+  const project = (lat, lon) => [
+    pad + ((lon - minLon) / dLon) * (w - 2 * pad),
+    pad + (1 - (lat - minLat) / dLat) * (h - 2 * pad),
+  ];
+  const maxC = Math.max(...clusters.map(c => c.count), 1);
+  clusters.forEach(c => {
+    const [x, y] = project(c.latitude, c.longitude);
+    const r = 5 + 16 * Math.sqrt(c.count / maxC);
+    const grd = g.createRadialGradient(x, y, 0, x, y, r * 2.2);
+    grd.addColorStop(0, "rgba(86,212,221,.55)");
+    grd.addColorStop(1, "rgba(86,212,221,0)");
+    g.fillStyle = grd;
+    g.beginPath(); g.arc(x, y, r * 2.2, 0, Math.PI * 2); g.fill();
+    g.fillStyle = "rgba(76,154,255,.9)";
+    g.beginPath(); g.arc(x, y, r, 0, Math.PI * 2); g.fill();
+    g.fillStyle = "#dfe6ef";
+    g.font = "10px monospace";
+    g.textAlign = "center";
+    if (r > 9) g.fillText(String(c.count), x, y + 3);
+  });
+}
+
+function drawStacked(canvas, days, keys) {
+  const wrap = canvas.parentElement;
+  const w = wrap.clientWidth || 720, h = 150;
+  canvas.width = w * devicePixelRatio;
+  canvas.height = h * devicePixelRatio;
+  canvas.style.width = w + "px";
+  const g = canvas.getContext("2d");
+  g.setTransform(devicePixelRatio, 0, 0, devicePixelRatio, 0, 0);
+  g.fillStyle = "#070b12";
+  g.fillRect(0, 0, w, h);
+  if (!days.length || !keys.length) return;
+  const peak = Math.max(...days.map(d => d.total || 0), 1);
+  const padL = 8, padB = 4, padT = 8;
+  const bw = (w - padL * 2) / days.length;
+  days.forEach((d, i) => {
+    let y = h - padB;
+    keys.forEach(k => {
+      const n = d[k] || 0;
+      if (!n) return;
+      const bh = (n / peak) * (h - padT - padB);
+      g.fillStyle = CAT_COL[k] || "#4c9aff";
+      g.fillRect(padL + i * bw + 0.5, y - bh, Math.max(1, bw - 1), bh);
+      y -= bh;
+    });
+  });
+}
+
+function hexBlock(prev) {
+  const box = el("div", "hexview");
+  if (!prev || prev.error) {
+    box.textContent = (prev && prev.error) || "No hex";
+    return box;
+  }
+  box.appendChild(el("div", "muted",
+    (prev.mime || "") + " · " + (prev.size || 0) + " bytes · offset "
+    + (prev.offset || 0)));
+  (prev.lines || []).forEach(ln => {
+    const row = el("div");
+    const off = el("span", "off",
+      ln.offset.toString(16).padStart(8, "0") + "  ");
+    const hx = el("span", "hx", String(ln.hex).padEnd(48, " ") + "  ");
+    const as = el("span", "as", ln.ascii || "");
+    row.appendChild(off); row.appendChild(hx); row.appendChild(as);
+    box.appendChild(row);
+  });
+  return box;
+}
+
+function drawClock(canvas, hourly) {
+  const wrap = canvas.parentElement;
+  const w = wrap.clientWidth || 420, h = 280;
+  canvas.width = w * devicePixelRatio;
+  canvas.height = h * devicePixelRatio;
+  canvas.style.width = w + "px";
+  const g = canvas.getContext("2d");
+  g.setTransform(devicePixelRatio, 0, 0, devicePixelRatio, 0, 0);
+  g.fillStyle = "#070b12";
+  g.fillRect(0, 0, w, h);
+  const cx = w / 2, cy = h / 2 + 6, R = Math.min(w, h) * 0.38;
+  const peak = Math.max(...hourly.map(x => x.count || 0), 1);
+  g.strokeStyle = "#1c2836";
+  g.beginPath(); g.arc(cx, cy, R, 0, Math.PI * 2); g.stroke();
+  for (let hr = 0; hr < 24; hr++) {
+    const hit = hourly.find(x => String(x.label || "").startsWith(String(hr).padStart(2, "0")));
+    const n = hit ? hit.count : 0;
+    const a0 = -Math.PI / 2 + (hr / 24) * Math.PI * 2;
+    const a1 = -Math.PI / 2 + ((hr + 1) / 24) * Math.PI * 2;
+    const r = 18 + (R - 18) * (n / peak);
+    g.beginPath();
+    g.moveTo(cx + Math.cos(a0) * 16, cy + Math.sin(a0) * 16);
+    g.arc(cx, cy, r, a0, a1);
+    g.lineTo(cx + Math.cos(a1) * 16, cy + Math.sin(a1) * 16);
+    g.closePath();
+    const night = hr < 6 || hr >= 22;
+    g.fillStyle = n
+      ? (night ? `rgba(163,113,247,${0.25 + 0.7 * n / peak})`
+               : `rgba(76,154,255,${0.25 + 0.7 * n / peak})`)
+      : "#121820";
+    g.fill();
+  }
+  g.fillStyle = "#6b7889";
+  g.font = "10px monospace";
+  g.textAlign = "center";
+  for (let hr = 0; hr < 24; hr += 3) {
+    const a = -Math.PI / 2 + (hr / 24) * Math.PI * 2;
+    g.fillText(String(hr), cx + Math.cos(a) * (R + 16), cy + Math.sin(a) * (R + 16) + 3);
+  }
+}
+
+async function viewClock() {
+  loading("Building activity clock…");
+  const data = await api("dashboard");
+  const charts = data.charts || {};
+  MAIN().innerHTML = "";
+  const wrap = el("div", "viz");
+  const grid = el("div", "vizgrid");
+  const c = el("div", "card wide");
+  c.appendChild(el("h3", "", "Activity clock"));
+  c.appendChild(el("div", "muted",
+    "XAMN-grade temporal profile. Purple wedges are night hours (22:00–06:00)."));
+  const cv = el("canvas", "clockcv");
+  cv.style.height = "360px";
+  c.appendChild(cv);
+  grid.appendChild(c);
+  grid.appendChild(activityCard(data, charts));
+  wrap.appendChild(grid);
+  MAIN().appendChild(wrap);
+  requestAnimationFrame(() => drawClock(cv, charts.hourly || []));
+}
+
+async function viewFiles() {
+  loading("Building source tree…");
+  const data = await api("sources", { limit: 500 });
+  const nodes = data.nodes || [];
+  MAIN().innerHTML = "";
+  const card = el("div", "card wide");
+  card.style.margin = "14px";
+  card.appendChild(el("h3", "", "File system / source paths"));
+  card.appendChild(el("div", "muted",
+    "Every artifact traces to a path on the device or in the backup. "
+    + "This is the XAMN file-system view — plus category mix per path."));
+  if (!nodes.length) {
+    card.appendChild(el("div", "muted", "No source paths recorded."));
+  } else {
+    const tree = el("div", "srctree");
+    nodes.forEach(n => {
+      const row = el("div", "row");
+      row.appendChild(el("span", "mono", n.path));
+      row.appendChild(el("span", "hn", String(n.count)));
+      row.title = JSON.stringify(n.categories || {});
+      row.onclick = () => {
+        S.q = '"' + String(n.path).replace(/"/g, "") + '"';
+        $("#q").value = S.q;
+        go("timeline");
+      };
+      tree.appendChild(row);
+    });
+    card.appendChild(tree);
+  }
+  MAIN().appendChild(card);
+  paintStatus(nodes.length);
+}
+
+function drawLaneChart(canvas, buckets, categories, colours) {
+  const wrap = canvas.parentElement;
+  const w = wrap.clientWidth || 900, h = wrap.clientHeight || 180;
+  canvas.width = w * devicePixelRatio;
+  canvas.height = h * devicePixelRatio;
+  const g = canvas.getContext("2d");
+  g.scale(devicePixelRatio, devicePixelRatio);
+  g.clearRect(0, 0, w, h);
+  if (!buckets.length) return;
+  const cats = Object.keys(categories || {});
+  const lanes = Math.max(cats.length, 1);
+  const laneH = (h - 20) / lanes;
+  const maxC = Math.max(...buckets.map(b => b.count), 1);
+  const bw = Math.max(2, w / buckets.length - 1);
+  buckets.forEach((b, i) => {
+    const x = 8 + i * (w - 16) / buckets.length;
+    cats.forEach((cat, li) => {
+      const pts = (categories[cat] || []);
+      const hit = pts.find(p => p.key === b.key);
+      const n = hit ? hit.count : 0;
+      if (!n) return;
+      const bh = (n / maxC) * (laneH - 6);
+      g.fillStyle = (colours && colours[cat]) || "#4c9aff";
+      g.fillRect(x, 10 + li * laneH + laneH - bh, bw, bh);
+    });
+  });
+}
+
+/* ───────────────────────────────────────────────────────────── analytics */
+async function viewAnalytics() {
+  loading("Computing behavioural statistics…");
+  const data = await api("analytics", { q: effectiveQuery() });
+  const stats = data.statistics || {};
+  const charts = data.charts || {};
+  MAIN().innerHTML = "";
+  const wrap = el("div", "viz");
+  const grid = el("div", "vizgrid");
+
+  const sum = el("div", "card wide");
+  sum.appendChild(el("h3", "", "Examination summary"));
+  [
+    ["Artifacts", stats.total_artifacts],
+    ["Timestamped", stats.timestamped],
+    ["Span (days)", stats.span_days],
+    ["Deleted recovered", stats.deleted_recovered],
+    ["Geolocated", stats.geolocated_artifacts],
+    ["Call time", stats.total_call_display],
+  ].forEach(([k, v]) => {
+    if (v == null) return;
+    const r = el("div", "kv");
+    r.appendChild(el("b", "", k));
+    r.appendChild(el("span", "mono", String(v)));
+    sum.appendChild(r);
+  });
+  grid.appendChild(sum);
+
+  const c1 = el("div", "card");
+  c1.appendChild(el("h3", "", "Hourly activity"));
+  c1.appendChild(barPanel("", charts.hourly || [], "label"));
+  grid.appendChild(c1);
+
+  const c2 = el("div", "card");
+  c2.appendChild(el("h3", "", "Weekday activity"));
+  c2.appendChild(barPanel("", charts.weekday || [], "label"));
+  grid.appendChild(c2);
+
+  const bursts = el("div", "card wide");
+  bursts.appendChild(el("h3", "", "Activity bursts"));
+  (stats.bursts || []).slice(0, 12).forEach(b => {
+    const r = el("div", "kv");
+    r.appendChild(el("b", "", (b.start_iso || "").slice(0, 16)));
+    r.appendChild(el("span", "", `${b.count} events · ${b.duration_minutes} min`));
+    bursts.appendChild(r);
+  });
+  if (!(stats.bursts || []).length)
+    bursts.appendChild(el("div", "muted", "No bursts detected."));
+  grid.appendChild(bursts);
+
+  const gaps = el("div", "card wide");
+  gaps.appendChild(el("h3", "", "Long silences"));
+  (stats.gaps || []).slice(0, 10).forEach(g => {
+    const r = el("div", "kv");
+    r.appendChild(el("b", "", `${g.hours}h gap`));
+    r.appendChild(el("span", "", `${g.before_iso || ""} → ${g.after_iso || ""}`));
+    gaps.appendChild(r);
+  });
+  if (!(stats.gaps || []).length)
+    gaps.appendChild(el("div", "muted", "No significant gaps."));
+  grid.appendChild(gaps);
+
+  const anom = el("div", "card wide");
+  anom.appendChild(el("h3", "", "Timestamp anomalies"));
+  (stats.anomalies || []).slice(0, 15).forEach(a => {
+    const r = el("div", "kv");
+    r.appendChild(el("b", "", a.kind || "anomaly"));
+    r.appendChild(el("span", "", a.detail || a.message || ""));
+    anom.appendChild(r);
+  });
+  if (!(stats.anomalies || []).length)
+    anom.appendChild(el("div", "muted", "No clock anomalies detected."));
+  grid.appendChild(anom);
+
+  wrap.appendChild(grid);
+  MAIN().appendChild(wrap);
+  paintStatus(stats.total_artifacts);
+}
+
+/* ───────────────────────────────────────────────────────────────── places */
+async function viewPlaces() {
+  loading("Building geo map…");
+  const data = await api("places/clusters");
+  MAIN().innerHTML = "";
+  const clusters = data.clusters || [];
+  if (!clusters.length) return emptyState("No geolocated artifacts",
+    "Nothing with GPS coordinates was found in this container.");
+
+  const wrap = el("div", "mapwrap");
+  const cv = el("canvas"); cv.id = "mapCanvas";
+  wrap.appendChild(cv);
+  const legend = el("div", "maplegend");
+  legend.innerHTML = `<b>${data.count}</b> geolocated points · `
+    + `<b>${clusters.length}</b> clusters · click a cluster to filter`;
+  wrap.appendChild(legend);
+  MAIN().appendChild(wrap);
+
+  const bounds = data.bounds || {};
+  const draw = () => {
+    const w = wrap.clientWidth, h = wrap.clientHeight;
+    cv.width = w * devicePixelRatio; cv.height = h * devicePixelRatio;
+    const g = cv.getContext("2d");
+    g.scale(devicePixelRatio, devicePixelRatio);
+    g.fillStyle = "#0a1018";
+    g.fillRect(0, 0, w, h);
+    g.strokeStyle = "#1c2836";
+    for (let i = 0; i < 8; i++) {
+      g.beginPath();
+      g.moveTo(0, (h / 8) * i); g.lineTo(w, (h / 8) * i); g.stroke();
+      g.beginPath();
+      g.moveTo((w / 8) * i, 0); g.lineTo((w / 8) * i, h); g.stroke();
+    }
+    const maxC = Math.max(...clusters.map(c => c.count), 1);
+    const project = (lat, lon) => {
+      const pad = 30;
+      const x = pad + ((lon - bounds.min_lon) / Math.max(bounds.max_lon - bounds.min_lon, 1e-6)) * (w - 2 * pad);
+      const y = pad + (1 - (lat - bounds.min_lat) / Math.max(bounds.max_lat - bounds.min_lat, 1e-6)) * (h - 2 * pad);
+      return [x, y];
+    };
+    (data.tracks || []).forEach(track => {
+      const pts = track.points || [];
+      if (pts.length < 2) return;
+      g.strokeStyle = "rgba(76,154,255,.35)";
+      g.lineWidth = 1.5;
+      g.beginPath();
+      pts.forEach((p, i) => {
+        const [x, y] = project(p.latitude, p.longitude);
+        if (i === 0) g.moveTo(x, y); else g.lineTo(x, y);
+      });
+      g.stroke();
+    });
+    clusters.forEach(c => {
+      const [x, y] = project(c.latitude, c.longitude);
+      const r = 4 + (c.count / maxC) * 18;
+      g.fillStyle = `rgba(76,154,255,${0.35 + 0.55 * (c.count / maxC)})`;
+      g.beginPath(); g.arc(x, y, r, 0, 7); g.fill();
+      g.fillStyle = "#dfe6ef";
+      g.font = "10px monospace";
+      if (r > 8) g.fillText(String(c.count), x - 4, y + 3);
+    });
+  };
+  draw();
+  window.addEventListener("resize", draw);
+  cv.onclick = ev => {
+    const rect = cv.getBoundingClientRect();
+    const x = ev.clientX - rect.left, y = ev.clientY - rect.top;
+    let best = null, bestD = 24;
+    clusters.forEach(c => {
+      const pad = 30, w = rect.width, h = rect.height;
+      const px = pad + ((c.longitude - bounds.min_lon) / Math.max(bounds.max_lon - bounds.min_lon, 1e-6)) * (w - 2 * pad);
+      const py = pad + (1 - (c.latitude - bounds.min_lat) / Math.max(bounds.max_lat - bounds.min_lat, 1e-6)) * (h - 2 * pad);
+      const d = Math.hypot(px - x, py - y);
+      if (d < bestD) { bestD = d; best = c; }
+    });
+    if (best && best.artifact_ids && best.artifact_ids[0]) {
+      S.q = 'id = "' + best.artifact_ids[0] + '"';
+      $("#q").value = S.q;
+      go("timeline");
+    }
+  };
+  paintStatus(data.count);
+}
+
+/* ──────────────────────────────────────────────────────────── media matches */
+async function viewMediaMatches() {
+  loading("Clustering perceptual hashes…");
+  const data = await api("media_matching");
+  const groups = data.groups || data.clusters || [];
+  MAIN().innerHTML = "";
+  if (!groups.length) return emptyState("No visual matches",
+    data.note || "Perceptual hashing requires Pillow and image artifacts.");
+
+  const wrap = el("div", "viz");
+  const intro = el("div", "card wide");
+  intro.appendChild(el("h3", "", "Visually similar images"));
+  intro.appendChild(el("div", "muted",
+    `${groups.length} cluster(s) · ${data.images_compared || data.compared || "—"} compared`));
+  wrap.appendChild(intro);
+
+  const grid = el("div", "matchgrid");
+  groups.slice(0, 40).forEach(grp => {
+    const card = el("div", "matchcard");
+    card.appendChild(el("div", "", `${grp.count || (grp.members || []).length} match(es) · `
+      + `distance ${grp.distance != null ? grp.distance : "—"}`));
+    const row = el("div", "matchrow");
+    (grp.members || grp.artifacts || []).slice(0, 4).forEach(m => {
+      const sha = m.blob_sha256 || m.sha256;
+      if (sha) {
+        const img = el("img");
+        img.src = blobUrl(sha);
+        row.appendChild(img);
+      }
+    });
+    card.appendChild(row);
+    const ids = (grp.members || grp.artifacts || []).map(m => m.artifact_id).filter(Boolean);
+    if (ids.length) {
+      const b = el("button", "btn sm", "Show cluster");
+      b.onclick = () => {
+        S.q = ids.slice(0, 12).map(i => 'id = "' + i + '"').join(" OR ");
+        $("#q").value = S.q;
+        go("media");
+      };
+      card.appendChild(b);
+    }
+    grid.appendChild(card);
+  });
+  wrap.appendChild(grid);
+  MAIN().appendChild(wrap);
+  paintStatus(groups.length);
+}
+
+/* ──────────────────────────────────────────────────────────────── fusion */
+async function viewFusion() {
+  loading("Attributing device use…");
+  const data = await api("fusion");
+  MAIN().innerHTML = "";
+  const wrap = el("div", "viz");
+  const grid = el("div", "vizgrid");
+
+  const cov = el("div", "card");
+  cov.appendChild(el("h3", "", "Owner attribution coverage"));
+  const pct = data.coverage != null ? Math.round(data.coverage * 100) + "%" : "—";
+  cov.appendChild(el("div", "big", pct));
+  cov.appendChild(el("div", "muted",
+    data.telemetry_available
+      ? "KnowledgeC / usage telemetry corroborated independent signals."
+      : "Limited telemetry — attribution is conservative."));
+  grid.appendChild(cov);
+
+  const brk = el("div", "card wide");
+  brk.appendChild(el("h3", "", "Event breakdown"));
+  Object.entries(data.by_attribution || {}).forEach(([k, n]) => {
+    const r = el("div", "kv");
+    r.appendChild(el("b", "", k));
+    r.appendChild(el("span", "mono", String(n)));
+    brk.appendChild(r);
+  });
+  grid.appendChild(brk);
+
+  const ev = el("div", "card wide");
+  ev.appendChild(el("h3", "", "Sample attributed events"));
+  (data.sample_events || data.events || []).slice(0, 25).forEach(e => {
+    const r = el("div", "kv");
+    r.appendChild(el("b", "", (e.iso || e.timestamp || "").toString().slice(0, 16)));
+    r.appendChild(el("span", "", e.summary || e.detail || e.app || ""));
+    ev.appendChild(r);
+  });
+  if (!(data.sample_events || data.events || []).length)
+    ev.appendChild(el("div", "muted", "No sample events returned."));
+  grid.appendChild(ev);
+
+  wrap.appendChild(grid);
+  MAIN().appendChild(wrap);
+  paintStatus(data.events || 0);
+}
+
+/* ──────────────────────────────────────────────────────────── communities */
+async function viewCommunities() {
+  loading("Detecting community structure…");
+  const data = await api("communities");
+  MAIN().innerHTML = "";
+  const groups = data.groups || data.communities || [];
+  if (!groups.length && !data.structure_is_meaningful)
+    return emptyState("No meaningful communities",
+      data.interpretation || data.note ||
+      "A single hub with spokes is one popular contact, not a network.");
+
+  const wrap = el("div", "viz");
+  const head = el("div", "card wide");
+  head.appendChild(el("h3", "", "Social communities"));
+  head.appendChild(el("div", "muted",
+    `${data.count || groups.length} group(s) · modularity `
+    + `${data.modularity != null ? Number(data.modularity).toFixed(3) : "—"}`));
+  wrap.appendChild(head);
+
+  const grid = el("div", "vizgrid");
+  groups.forEach((grp, i) => {
+    const card = el("div", "card");
+    card.appendChild(el("h3", "", `Community ${i + 1}`));
+    (grp.members || grp.nodes || []).slice(0, 12).forEach(m => {
+      const r = el("div", "kv");
+      const label = typeof m === "string" ? m : (m.label || m.key || "");
+      r.appendChild(el("b", "", label.slice(0, 28)));
+      r.appendChild(el("span", "mono",
+        String(typeof m === "object" ? (m.artifacts || m.count || "") : "")));
+      card.appendChild(r);
+    });
+    grid.appendChild(card);
+  });
+  wrap.appendChild(grid);
+  MAIN().appendChild(wrap);
+  paintStatus(groups.length);
+}
+
+/* ──────────────────────────────────────────────────────────────── graph */
+async function viewGraph() {
+  loading("Building the connection graph…");
+  const bar = el("div", "graphbar");
+  const scopeSel = el("select");
+  [["all", "All comms"], ["messages", "Messages"], ["calls", "Calls"]]
+    .forEach(([v, l]) => {
+      const o = el("option", "", l); o.value = v; scopeSel.appendChild(o);
+    });
+  const minW = el("input");
+  minW.type = "number"; minW.value = "2"; minW.min = "1"; minW.style.width = "52px";
+  const run = el("button", "btn primary sm", "Redraw");
+  bar.appendChild(el("span", "muted", "Scope"));
+  bar.appendChild(scopeSel);
+  bar.appendChild(el("span", "muted", "Min weight"));
+  bar.appendChild(minW);
+  bar.appendChild(run);
+
+  const host = el("div");
+  host.style.cssText = "flex:1;overflow:hidden;position:relative;min-height:360px";
+  const cv = el("canvas");
+  cv.style.cssText = "width:100%;height:100%;display:block;cursor:pointer";
+  host.appendChild(cv);
+
+  const side = el("div", "card");
+  side.style.cssText = "width:280px;overflow-y:auto;border-left:1px solid var(--line)";
+  side.id = "graphSide";
+
+  const layout = el("div");
+  layout.style.cssText = "display:grid;grid-template-rows:auto 1fr;height:100%";
+  layout.appendChild(bar);
+  const body = el("div");
+  body.style.cssText = "display:grid;grid-template-columns:1fr 280px;height:100%";
+  body.appendChild(host); body.appendChild(side);
+  layout.appendChild(body);
+  MAIN().innerHTML = "";
+  MAIN().appendChild(layout);
+
+  const paint = async () => {
+    side.innerHTML = "<div class='muted' style='padding:12px'>Loading…</div>";
+    const data = await api("connections", {
+      scope: scopeSel.value, min_weight: minW.value, max_nodes: 180 });
+    const nodes = data.nodes || [];
+    const links = data.links || data.edges || [];
+    if (!nodes.length) {
+      side.innerHTML = "";
+      return emptyState("No connections", "No correspondents with enough traffic.");
+    }
+
+    const w = host.clientWidth || 800, h = host.clientHeight || 500;
+    cv.width = w * devicePixelRatio; cv.height = h * devicePixelRatio;
+    const g = cv.getContext("2d");
+    g.scale(devicePixelRatio, devicePixelRatio);
+
+    const nodeKey = n => n.key || n.id || n.label;
+    const N = nodes.length;
+    const P = nodes.map((n, i) => ({
+      x: w / 2 + Math.cos(2 * Math.PI * i / N) * Math.min(w, h) * 0.34,
+      y: h / 2 + Math.sin(2 * Math.PI * i / N) * Math.min(w, h) * 0.34,
+      n,
+    }));
+    const idx = new Map(nodes.map((n, i) => [nodeKey(n), i]));
+    const brokers = new Set((data.brokers || []).map(b => b.key || b.label || b));
+
+    for (let pass = 0; pass < 240; pass++) {
+      for (const L of links) {
+        const a = idx.get(L.source ?? L.from), b = idx.get(L.target ?? L.to);
+        if (a == null || b == null) continue;
+        const dx = P[b].x - P[a].x, dy = P[b].y - P[a].y;
+        const f = 0.0018 * (L.weight || L.artifact_count || 1);
+        P[a].x += dx * f; P[a].y += dy * f;
+        P[b].x -= dx * f; P[b].y -= dy * f;
+      }
+      for (let i = 0; i < N; i++) for (let j = i + 1; j < N; j++) {
+        const dx = P[j].x - P[i].x, dy = P[j].y - P[i].y;
+        const d2 = dx * dx + dy * dy || 1;
+        if (d2 > 24000) continue;
+        const f = 260 / d2;
+        P[i].x -= dx * f; P[i].y -= dy * f;
+        P[j].x += dx * f; P[j].y += dy * f;
+      }
+    }
+
+    g.clearRect(0, 0, w, h);
+    g.strokeStyle = "#2a3441";
+    links.forEach(L => {
+      const a = idx.get(L.source ?? L.from), b = idx.get(L.target ?? L.to);
+      if (a == null || b == null) return;
+      g.lineWidth = Math.min(4, 0.5 + (L.weight || L.artifact_count || 1) * 0.15);
+      g.beginPath(); g.moveTo(P[a].x, P[a].y); g.lineTo(P[b].x, P[b].y); g.stroke();
+    });
+    P.forEach(p => {
+      const key = nodeKey(p.n);
+      const r = Math.min(16, 5 + (p.n.artifact_count || p.n.count || 1) * 0.35);
+      g.fillStyle = p.n.is_owner ? "#4c9aff"
+        : brokers.has(key) ? "#e2b33c" : "#8899aa";
+      g.beginPath(); g.arc(p.x, p.y, r, 0, 7); g.fill();
+      g.fillStyle = "#93a1b3";
+      g.font = "10px monospace";
+      g.fillText(String(p.n.label || key || "").slice(0, 24), p.x + r + 3, p.y + 3);
+    });
+
+    side.innerHTML = "";
+    side.appendChild(el("h3", "", "Top contacts"));
+    (data.top_contacts || []).slice(0, 10).forEach(c => {
+      const r = el("div", "kv");
+      const b = el("button", "", c.label || c.key || "");
+      b.style.color = "var(--accent)";
+      b.onclick = () => {
+        S.q = 'party:"' + (c.label || c.key || "").replace(/"/g, "") + '"';
+        $("#q").value = S.q; go("timeline");
+      };
+      const wrap = el("b"); wrap.appendChild(b);
+      r.appendChild(wrap);
+      r.appendChild(el("span", "mono", String(c.artifact_count || c.count || "")));
+      side.appendChild(r);
+    });
+    if ((data.brokers || []).length) {
+      side.appendChild(el("h3", "", "Brokers"));
+      data.brokers.slice(0, 6).forEach(c => {
+        side.appendChild(el("div", "muted", (c.label || c.key || "") + " · betweenness "
+          + (c.betweenness != null ? Number(c.betweenness).toFixed(2) : "")));
+      });
+    }
+    paintStatus(nodes.length);
+  };
+
+  run.onclick = paint;
+  scopeSel.onchange = paint;
+  await paint();
+}
+
+/* ────────────────────────────────────────────────────────────────── misc */
+async function viewApps() {
+  loading("Reading applications…");
+  const apps = await api("applications");
+  MAIN().innerHTML = "";
+  const g = el("div", "grid");
+  const c = el("div", "card wide");
+  c.appendChild(el("h3", "", (apps.length || 0) + " application(s)"));
+  (apps || []).forEach(a => {
+    const r = el("div", "kv");
+    const b = el("button", "", a.app || a.name || "(unknown)");
+    b.style.color = "var(--accent)";
+    b.onclick = () => { S.q = 'app = "' + (a.app || a.name) + '"';
+                        $("#q").value = S.q; go("timeline"); };
+    const wrap = el("b"); wrap.appendChild(b);
+    r.appendChild(wrap);
+    r.appendChild(el("span", "mono", String(a.count ?? a.artifacts ?? "")));
+    c.appendChild(r);
+  });
+  g.appendChild(c); MAIN().appendChild(g);
+}
+
+async function viewIntegrity() {
+  loading("Verifying the container…");
+  const rep = await api("integrity");
+  MAIN().innerHTML = "";
+  const g = el("div", "grid");
+  const c = el("div", "card wide");
+  c.appendChild(el("h3", "", "Container integrity"));
+  const ok = rep.ok ?? rep.verified;
+  const badge = el("div", "big");
+  badge.textContent = ok ? "Verified" : "FAILED";
+  badge.style.color = ok ? "var(--ok)" : "var(--danger)";
+  c.appendChild(badge);
+  Object.entries(rep).forEach(([k, v]) => {
+    if (typeof v === "object") return;
+    const r = el("div", "kv");
+    r.appendChild(el("b", "", k));
+    r.appendChild(el("span", "mono", String(v)));
+    c.appendChild(r);
+  });
+  if (!ok) c.appendChild(el("div", "caveat",
+    "Do not rely on this container. A failed seal means the contents no " +
+    "longer match what was recorded at acquisition."));
+  g.appendChild(c); MAIN().appendChild(g);
+}
+
+async function viewLog(endpoint, title) {
+  loading("Loading " + title.toLowerCase() + "…");
+  const rows = await api(endpoint);
+  MAIN().innerHTML = "";
+  const host = el("div"); host.id = "list";
+  host.style.height = "100%"; host.style.overflowY = "auto";
+  if (!rows.length) { host.appendChild(el("div", "empty", "Empty")); }
+  else {
+    const t = el("table"), thead = el("thead"), hr = el("tr");
+    const cols = Object.keys(rows[0]);
+    cols.forEach(k => hr.appendChild(el("th", "", k)));
+    thead.appendChild(hr); t.appendChild(thead);
+    const tb = el("tbody");
+    rows.forEach(r => {
+      const tr = el("tr");
+      cols.forEach(k => tr.appendChild(el("td", "mono",
+        typeof r[k] === "object" ? JSON.stringify(r[k]) : String(r[k] ?? ""))));
+      tb.appendChild(tr);
+    });
+    t.appendChild(tb); host.appendChild(t);
+  }
+  MAIN().appendChild(host);
+  paintStatus(rows.length);
+}
+
+/* ═════════════════════════════════════════════════════════════════ status */
+function paintStatus(shown, total) {
+  const ov = S.overview || {};
+  const dev = ov.device || {};
+  const who = [dev.make, dev.model].filter(Boolean).join(" ");
+  $("#stCase").textContent = (ov.case_id || "case")
+    + (ov.exhibit_id ? " / " + ov.exhibit_id : "")
+    + (who ? " · " + who : "");
+  if (shown != null) {
+    $("#stCount").textContent = total != null && total !== shown
+      ? shown.toLocaleString() + " shown of " + total.toLocaleString() +
+        " matching"
+      : shown.toLocaleString() + " shown";
+  } else if (ov.total_artifacts) {
+    $("#stCount").textContent = Number(ov.total_artifacts).toLocaleString() + " artifacts";
+  }
+  const ok = ov.integrity_ok ?? (ov.integrity && ov.integrity.ok);
+  const n = $("#stIntegrity");
+  n.textContent = ok === false ? "INTEGRITY FAILED"
+                : ok === true ? "integrity verified" : "";
+  n.style.color = ok === false ? "var(--danger)" : "var(--ok)";
+}
+
+/* ══════════════════════════════════════════════════════════════ shortcuts */
+let chord = null;
+document.addEventListener("keydown", ev => {
+  const tag = (ev.target.tagName || "").toLowerCase();
+  const typing = tag === "input" || tag === "textarea" || tag === "select";
+
+  if (ev.key === "Escape") {
+    if ($("#help").classList.contains("show")) {
+      $("#help").classList.remove("show"); return;
+    }
+    if (typing) { ev.target.blur(); return; }
+    S.detail = false;
+    const sp = $(".split"); if (sp) sp.classList.remove("detail");
+    return;
+  }
+  if (typing) {
+    if (ev.key === "Enter" && ev.target.id === "q") runQuery();
+    return;
+  }
+
+  if (chord === "g") {
+    chord = null;
+    const map = { d: "dashboard", t: "timeline", a: "analytics", m: "messages",
+                  f: "findings", i: "media", c: "conversations", e: "entities",
+                  n: "graph", p: "places", k: "keywords", b: "bookmarks",
+                  o: "clock", s: "files" };
+    if (map[ev.key]) { ev.preventDefault(); go(map[ev.key]); }
+    return;
+  }
+  if (ev.key === "g") { chord = "g"; setTimeout(() => chord = null, 900); return; }
+
+  if (ev.key === "/") { ev.preventDefault(); $("#q").focus(); $("#q").select(); }
+  else if (ev.key === "?") { $("#help").classList.toggle("show"); }
+  else if (ev.key === "x") { go("deleted"); }
+  else if (ev.key === "j" || ev.key === "ArrowDown") {
+    ev.preventDefault(); if (S.rows.length) select(Math.min(S.sel + 1, S.rows.length - 1));
+  } else if (ev.key === "k" || ev.key === "ArrowUp") {
+    ev.preventDefault(); if (S.rows.length) select(Math.max(S.sel - 1, 0));
+  } else if (ev.key === "Enter" && S.sel >= 0) {
+    select(S.sel);
+  }
+  const sel = document.querySelector("#list tbody tr.sel");
+  if (sel) sel.scrollIntoView({ block: "nearest" });
+});
+
+/* ══════════════════════════════════════════════════════════════ saved views */
+function savedViews() {
+  try { return JSON.parse(localStorage.getItem("argus.views") || "[]"); }
+  catch (e) { return []; }
+}
+function refreshSaved() {
+  const sel = $("#saved");
+  sel.innerHTML = "";
+  const blank = el("option", "", "— saved views —"); blank.value = "";
+  sel.appendChild(blank);
+  savedViews().forEach((v, i) => {
+    const o = el("option", "", v.name); o.value = String(i); sel.appendChild(o);
+  });
+  const save = el("option", "", "＋ save current view"); save.value = "__save";
+  sel.appendChild(save);
+}
+$("#savedBtn").onclick = () => {
+  const sel = $("#saved");
+  sel.style.display = sel.style.display === "none" ? "" : "none";
+  refreshSaved();
+};
+$("#saved").onchange = ev => {
+  const v = ev.target.value;
+  if (v === "__save") {
+    const name = prompt("Name this view");
+    if (name) {
+      const all = savedViews();
+      all.push({ name, view: S.view, q: S.q,
+                 facets: Object.fromEntries(Object.entries(S.facets)
+                   .map(([k, s]) => [k, [...s]])), span: S.span });
+      try { localStorage.setItem("argus.views", JSON.stringify(all)); } catch (e) {}
+      say("View saved", "ok");
+    }
+    refreshSaved(); ev.target.value = ""; return;
+  }
+  if (v === "") return;
+  const saved = savedViews()[Number(v)];
+  if (!saved) return;
+  S.q = saved.q || ""; $("#q").value = S.q;
+  S.facets = Object.fromEntries(Object.entries(saved.facets || {})
+    .map(([k, arr]) => [k, new Set(arr)]));
+  S.span = saved.span || null;
+  go(saved.view || "timeline");
+};
+
+/* ══════════════════════════════════════════════════════════════════ boot */
+function runQuery() {
+  S.q = $("#q").value;
+  S.sel = -1;
+  if (["dashboard", "findings", "integrity", "entities", "graph",
+       "log", "audit", "conversations", "analytics", "places", "fusion",
+       "communities", "mediamatch", "clock", "files"].includes(S.view)) S.view = "timeline";
+  buildRail();
+  render();
+}
+$("#run").onclick = runQuery;
+$("#helpBtn").onclick = () => $("#help").classList.toggle("show");
+$("#help").onclick = ev => { if (ev.target.id === "help")
+  $("#help").classList.remove("show"); };
+
+async function ensureSuggest() {
+  if (S.suggestData) return S.suggestData;
+  S.suggestData = await api("suggest").catch(() => ({}));
+  return S.suggestData;
+}
+
+function paintSuggest(filter) {
+  const box = $("#aqlSuggest");
+  if (!box || !S.suggestData) return;
+  const q = (filter || "").trim().toLowerCase();
+  const chip = (text, insert) => {
+    const c = el("span", "chip", text);
+    c.onclick = () => {
+      $("#q").value = insert || text;
+      S.q = $("#q").value;
+      box.style.display = "none";
+      runQuery();
+    };
+    return c;
+  };
+  box.innerHTML = "";
+  const addGroup = (title, items, mapFn) => {
+    const list = (items || []).filter(x =>
+      !q || String(x).toLowerCase().includes(q));
+    if (!list.length) return;
+    box.appendChild(el("h5", "", title));
+    list.slice(0, 12).forEach(x => box.appendChild(chip(
+      String(x), mapFn ? mapFn(x) : String(x))));
+  };
+  addGroup("Examples", S.suggestData.examples);
+  addGroup("Categories", S.suggestData.category,
+    x => 'category = "' + x + '"');
+  addGroup("Apps", S.suggestData.app, x => 'app:' + x);
+  addGroup("Tags", S.suggestData.tag, x => 'tag:' + x);
+  box.style.display = box.childNodes.length ? "block" : "none";
+}
+
+let suggestTimer = null;
+$("#q").addEventListener("focus", async () => {
+  await ensureSuggest();
+  paintSuggest($("#q").value);
+});
+$("#q").addEventListener("input", () => {
+  clearTimeout(suggestTimer);
+  suggestTimer = setTimeout(() => paintSuggest($("#q").value), 100);
+});
+$("#q").addEventListener("keydown", ev => {
+  if (ev.key === "Escape") $("#aqlSuggest").style.display = "none";
+});
+document.addEventListener("click", ev => {
+  if (!ev.target.closest("#top")) $("#aqlSuggest").style.display = "none";
+});
+
+function fillTz() {
+  const sel = $("#tz");
+  if (!sel) return;
+  const guess = -new Date().getTimezoneOffset();
+  const opts = [
+    [guess, "Local"], [0, "UTC"], [330, "IST +5:30"], [60, "CET +1"],
+    [120, "EET +2"], [-300, "EST −5"], [-480, "PST −8"],
+    [540, "JST +9"], [480, "CST +8"],
+  ];
+  const seen = new Set();
+  opts.forEach(([m, lab]) => {
+    if (seen.has(m)) return;
+    seen.add(m);
+    const o = el("option", "", lab);
+    o.value = String(m);
+    sel.appendChild(o);
+  });
+  try { TZ = parseInt(localStorage.getItem("argus.tz") || String(guess), 10); }
+  catch (e) { TZ = guess; }
+  if (Number.isNaN(TZ)) TZ = guess;
+  S.tz = TZ;
+  sel.value = String(TZ);
+  sel.onchange = () => {
+    TZ = parseInt(sel.value, 10) || 0;
+    S.tz = TZ;
+    S.overview = null;
+    S.intel = null;
+    try { localStorage.setItem("argus.tz", String(TZ)); } catch (e) {}
+    api("overview").then(ov => { S.overview = ov; buildRail(); paintStatus(); });
+    render();
+  };
+}
+
+(async function boot() {
+  fillTz();
+  if (!CONTAINERS) {
+    say("No extraction loaded — open from the ARGUS workbench.", "err");
+    $("#main").innerHTML = `<div class="empty"><b>No container</b>
+      Select at least one extraction in the workbench, then open Analyse.</div>`;
+    return;
+  }
+  if (window.parent !== window) {
+    const back = $("#backWb");
+    back.style.display = "";
+    back.onclick = () => {
+      try { window.parent.postMessage({ type: "argus:leave-analysis" }, "*"); }
+      catch (_) {}
+    };
+  }
+  try { S.overview = await api("overview");
+    const env = await api("env").catch(() => ({}));
+    $("#ver").textContent = "v" + (env.version || S.overview.version || "1.2.0");
+    const own = $("#ownerIds");
+    if (own && S.overview?.owner_suggestions?.length) {
+      own.placeholder = "Owner: " + S.overview.owner_suggestions.slice(0, 2).join(", ");
+    }
+    if (own) own.addEventListener("change", () => { S.intel = null; });
+  } catch (e) { say("Could not read the container: " + e.message, "err"); }
+  if (QP.get("q")) { S.q = QP.get("q"); $("#q").value = S.q; }
+  if (QP.get("artifact")) {
+    S.view = "timeline";
+    S.q = 'id = "' + QP.get("artifact") + '"';
+    $("#q").value = S.q;
+  }
+  try { if (!QP.get("artifact")) S.view = localStorage.getItem("argus.view") || "dashboard"; } catch (e) {}
+  buildRail();
+  paintStatus();
+  render();
+})();
+</script>
+</body>
+</html>
