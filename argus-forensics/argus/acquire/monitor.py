@@ -6,7 +6,7 @@ import re
 import threading
 import time
 from pathlib import Path
-from typing import Callable, Optional
+from typing import Callable, Optional, Tuple
 
 
 class ExtractionMonitor:
@@ -125,6 +125,7 @@ class MtpExtractionMonitor:
         self._disconnect_warned = False
         self._stall_warned = False
         self._last_files = -1
+        self._last_bytes = -1
         self._last_growth = time.time()
 
     def start(self) -> None:
@@ -152,15 +153,16 @@ class MtpExtractionMonitor:
                 return True
         return False
 
-    def _file_count(self) -> int:
+    def _disk_progress(self) -> Tuple[int, int]:
+        """Files and bytes landed so far, from the checkpoint where possible."""
         if not self.destination:
-            return 0
-        from .mtp import _count_files, _load_checkpoint
+            return 0, 0
+        from .mtp import _DiskStats, _load_checkpoint
 
         ck = _load_checkpoint(self.destination, self.device_name)
         if ck and ck.get("files_on_disk") is not None:
-            return int(ck["files_on_disk"])
-        return _count_files(self.destination)
+            return int(ck["files_on_disk"]), int(ck.get("bytes_on_disk") or 0)
+        return _DiskStats(self.destination, refresh_sec=0).snapshot(force=True)
 
     def _loop(self) -> None:
         while not self._stop.wait(self.interval):
@@ -179,18 +181,35 @@ class MtpExtractionMonitor:
                 self._disconnect_warned = False
 
             try:
-                files = self._file_count()
+                files, nbytes = self._disk_progress()
             except Exception:
                 continue
-            if files > self._last_files:
-                self._last_files = files
-                self._last_growth = time.time()
-                self._stall_warned = False
-            elif files == self._last_files and files > 0:
-                stall = time.time() - self._last_growth
-                if stall >= 120 and not self._stall_warned and self.log:
-                    self.log("mtp.session", "warning",
-                             f"Copy may be stalled ({files:,} files on disk, "
-                             f"no growth for {int(stall)}s) — keep screen unlocked",
-                             level="warning")
-                    self._stall_warned = True
+            self._check_stall(files, nbytes)
+
+    def _check_stall(self, files: int, nbytes: int) -> bool:
+        """Record progress; warn once if nothing has landed for a long time.
+
+        Returns whether the copy was seen to move. Bytes count as movement:
+        one large file — a video, a WhatsApp database — holds the file count
+        flat for minutes while the copy is perfectly healthy, and warning
+        "stalled" there puts something in the forensic log that is simply not
+        true and sends the examiner to check a cable that is fine. A change in
+        either direction is movement; a retry that removes a partial file is
+        still the copy doing something.
+        """
+        if files != self._last_files or nbytes != self._last_bytes:
+            self._last_files = files
+            self._last_bytes = nbytes
+            self._last_growth = time.time()
+            self._stall_warned = False
+            return True
+        if files > 0:
+            stall = time.time() - self._last_growth
+            if stall >= 120 and not self._stall_warned and self.log:
+                self.log("mtp.session", "warning",
+                         f"Copy may be stalled ({files:,} files on disk, "
+                         f"no new data for {int(stall)}s) — keep screen "
+                         f"unlocked",
+                         level="warning")
+                self._stall_warned = True
+        return False

@@ -18,10 +18,11 @@ import json
 import shutil
 import subprocess
 import tempfile
+import time
 import unittest
 from io import StringIO
 from pathlib import Path
-from typing import Any, Dict, Optional
+from typing import Any, Dict, List, Optional
 
 from argus.acquire import mtp
 
@@ -381,6 +382,58 @@ class DegradesQuietly(unittest.TestCase):
             self.assertEqual(mtp.devices(), [])
         finally:
             mtp.available = real
+
+
+class StallDetection(unittest.TestCase):
+    """A stall warning that fires during a healthy copy is a false statement.
+
+    Progress was tracked by file count alone, so a single large file — a video,
+    a WhatsApp database — streaming in for minutes held the count flat and was
+    reported as a stalled copy. That puts something untrue in the forensic log
+    and sends the examiner to check a cable that is fine.
+    """
+
+    def _monitor(self):
+        from argus.acquire.monitor import MtpExtractionMonitor
+
+        self.logged: List[str] = []
+        mon = MtpExtractionMonitor(
+            "PHONE", log=lambda *a, **k: self.logged.append(" ".join(map(str, a))))
+        mon._check_stall(100, 5_000)          # establish a baseline
+        mon._last_growth = time.time() - 600  # long past the 120s threshold
+        return mon
+
+    def test_one_large_file_growing_is_not_a_stall(self) -> None:
+        mon = self._monitor()
+        # Same file count, more bytes: a single big file still streaming in.
+        self.assertTrue(mon._check_stall(100, 900_000))
+        self.assertEqual(self.logged, [])
+
+    def test_nothing_changing_at_all_is_a_stall(self) -> None:
+        mon = self._monitor()
+        self.assertFalse(mon._check_stall(100, 5_000))
+        self.assertTrue(any("stalled" in m for m in self.logged))
+
+    def test_a_retry_removing_a_partial_file_counts_as_movement(self) -> None:
+        """Shrinking is the copy doing something, not the copy being stuck."""
+        mon = self._monitor()
+        self.assertTrue(mon._check_stall(99, 4_000))
+        self.assertEqual(self.logged, [])
+
+    def test_the_stall_is_reported_once_not_every_poll(self) -> None:
+        mon = self._monitor()
+        for _ in range(5):
+            mon._check_stall(100, 5_000)
+        self.assertEqual(len([m for m in self.logged if "stalled" in m]), 1)
+
+    def test_movement_rearms_the_warning(self) -> None:
+        """A copy that stalls, recovers, then stalls again must say so twice."""
+        mon = self._monitor()
+        mon._check_stall(100, 5_000)          # stalls, warns
+        mon._check_stall(101, 6_000)          # moves again
+        mon._last_growth = time.time() - 600
+        mon._check_stall(101, 6_000)          # stalls a second time
+        self.assertEqual(len([m for m in self.logged if "stalled" in m]), 2)
 
 
 if __name__ == "__main__":
