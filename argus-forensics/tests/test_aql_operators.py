@@ -98,7 +98,8 @@ class RefusesRatherThanGuesses(unittest.TestCase):
     def test_genuine_free_text_still_works(self) -> None:
         """Not everything with no operator is a mistake."""
         compiled = compile_query("burner phone")
-        self.assertIn("LIKE", compiled.where)
+        self.assertIn("artifact_fts", compiled.where)
+        self.assertIn("MATCH", compiled.where)
 
     def test_empty_query_matches_everything(self) -> None:
         self.assertEqual(compile_query("").where, "1=1")

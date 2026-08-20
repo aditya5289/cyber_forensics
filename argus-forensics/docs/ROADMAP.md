@@ -280,6 +280,43 @@ attributed event says so.
 
 ---
 
+### Co-location — same place, *same time* (`intel/colocation.py`)
+
+Shared-location correlation reported that two exhibits both recorded positions
+in the same 1 km cell. It could not say *when*, and its own caveat told the
+examiner to compare the timelines by hand. That comparison is now done:
+positions are matched within 500 m and 15 minutes, merged into **encounters**,
+and reported with when, where, how close, how many independent point pairs
+supported them, and which record types placed each device there.
+
+The analysis is defined as much by what it refuses. Three kinds of coordinate
+look exactly like a position and are none:
+
+| Coordinate | Why it is excluded |
+|---|---|
+| Maps searched destination | Intent to travel. Two people looking up the same address did not meet at it. |
+| **Received** location message | The *sender's* position. Counting it makes every shared pin look like both parties stood there — precisely backwards. |
+| Downloaded or forwarded photo | The original photographer's position. Only camera originals (in `DCIM`, carrying maker EXIF) place *this* handset. |
+
+A fix whose stated accuracy is worse than the match radius is dropped rather
+than matched loosely — a cell-tower fix good to 3 km cannot support a claim
+about a 500 m meeting, and quietly widening the radius would turn the weakest
+evidence into the most productive.
+
+Encounters split on a gap in **either** time or space, so an hour of fixes
+beside another handset is one encounter rather than twelve, and two meetings
+ten minutes apart at different places are not merged into one meeting at a
+centroid where neither device ever was. Confidence scales with tightness in
+space and time, corroboration by several point pairs, and the weight of the
+record type; a carved row weighs less than a live one.
+
+Eight or more encounters across five or more days is reported as the handsets
+**travelling together** — one person carrying both, or two people sharing a
+home or vehicle — rather than as a series of meetings, because that is the
+likelier explanation and calling it "meetings" would be wrong.
+
+---
+
 ## Honest limitations
 
 - Validation figures describe **this build on this platform** against a
@@ -313,3 +350,10 @@ attributed event says so.
 - Fusion coverage on a real handset is typically low. The attributed subset must
   not be mistaken for the whole picture.
 - A known-bad hash hit is only as strong as the provenance of the set.
+- Co-location places *devices* together, never named people: whoever was
+  carrying each handset produces an identical record. Device clocks drift
+  and may sit in different zones, so a genuine meeting can be missed and a
+  near miss can be matched. In a station or a shopping centre, being
+  within 500 m is not being together. Finding no encounter is not evidence
+  the devices were apart — location retention differs between handsets and
+  is usually sparse.

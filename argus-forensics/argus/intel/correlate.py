@@ -601,9 +601,11 @@ def correlation_findings(correlator: CrossExhibitCorrelator) -> List[Any]:
             why_it_matters=("Devices recording the same locations may have "
                             "been carried together, or their users met there."),
             caveat=("A 1 km cell is coarse and public places produce "
-                    "coincidental overlap. Co-location requires matching times "
-                    "as well as places — compare the timelines before "
-                    "concluding anything."),
+                    "coincidental overlap. This finding says only that both "
+                    "devices recorded positions here at some point, not that "
+                    "they were here together — for that, see any "
+                    "'colocation.rendezvous' finding, which matches times as "
+                    "well as places."),
         ))
 
     similar = correlator.name_similarities()

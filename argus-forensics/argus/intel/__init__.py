@@ -3,6 +3,7 @@
 ``entities``   validated extraction of phones, wallets, accounts, IDs, URLs
 ``findings``   auditable rules producing ranked, evidence-cited findings
 ``correlate``  cross-exhibit identity linking and community detection
+``colocation`` devices placed in the same place at the same time
 
 The single entry point most callers want is :func:`analyse`, which runs the
 whole layer over an analysis session and returns everything at once, with
@@ -16,12 +17,14 @@ from collections import Counter
 from typing import Any, Callable, Dict, Iterable, List, Optional
 
 from ..core.models import Artifact, Category
+from .colocation import ColocationAnalyser
 from .correlate import CrossExhibitCorrelator, detect_communities
 from .entities import EntityExtractor
 from .findings import Finding, FindingsEngine
 
 __all__ = ["analyse", "EntityExtractor", "FindingsEngine", "Finding",
-           "CrossExhibitCorrelator", "detect_communities"]
+           "CrossExhibitCorrelator", "detect_communities",
+           "ColocationAnalyser"]
 
 _ARTIFACT_BATCH = 8000
 
@@ -71,6 +74,7 @@ def analyse(session: Any, owner_name: str = "Device owner",
     from ..analyze.conversations import (build_conversations,
                                          conversation_findings)
     from ..analyze.graph import ConnectionGraph
+    from .colocation import colocation_findings
     from .correlate import community_findings, correlation_findings
     from .fusion import fuse_session, fusion_findings
 
@@ -168,6 +172,18 @@ def analyse(session: Any, owner_name: str = "Device owner",
             correlator.add_exhibit(label, arts)
         correlation = correlator.summary()
         findings.extend(correlation_findings(correlator))
+
+        # Shared locations say two devices were in the same cell at some
+        # point; they do not say when. Co-location narrows that to the same
+        # place at the same time, which is a far stronger claim and the one
+        # the correlator's own caveat tells the examiner to check by hand.
+        if progress:
+            progress("Checking for co-location between exhibits…")
+        colocator = ColocationAnalyser()
+        for label, arts in per_exhibit:
+            colocator.add_exhibit(label, arts)
+        correlation["colocation"] = colocator.summary()
+        findings.extend(colocation_findings(colocator))
 
     findings.sort(key=lambda f: (-f.score, f.rule_id))
     by_sev = Counter(f.severity for f in findings)

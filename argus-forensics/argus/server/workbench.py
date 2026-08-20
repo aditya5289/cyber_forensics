@@ -1004,9 +1004,19 @@ class _Handler(BaseHTTPRequestHandler):
             notes=body.get("notes", ""),
             resume=bool(body.get("resume")),
             resume_container=body.get("resume_container") or None,
-            turbo=bool(body.get("turbo", True)))
+            # Safe by default: turbo silently disables deleted-record carving
+            # (see apply_turbo_settings). An omitted field must mean full
+            # depth, matching AcquisitionPlan's own default and what the UI
+            # actually sends — it only sets turbo=true when the operator
+            # explicitly picks the Turbo method.
+            turbo=bool(body.get("turbo", False)))
         if not for_preview:
             plan.validate()
+            # Capability is a property of device_name + lock_state + method,
+            # not of whether hardware answers right now. Gating here means an
+            # unsupported combination is refused before a live device is even
+            # required, instead of being masked by "no device detected".
+            self._assert_acquire_supported(plan, method)
 
         device = None
         if method != "import":
@@ -1024,11 +1034,13 @@ class _Handler(BaseHTTPRequestHandler):
         wb = self.wb
         if not (plan.device_name and method != "import"):
             return
-        from ..acquire.ios_live import looks_like_apple
-        if looks_like_apple(plan.device_name) or method in (
-                "backup", "ios_backup"):
-            return
-        if method == "mtp":
+        # backup/ios_backup and mtp are not modeled as per-device capability
+        # rows - manual.assert_supported already remaps every iOS method name
+        # (filesystem, logical, comprehensive, turbo, mtp) onto "backup"
+        # internally, so an Apple device must NOT be exempted from the check
+        # below; that used to skip gating entirely for any Apple device name,
+        # which let a BFU iPhone be accepted for "filesystem" acquisition.
+        if method in ("backup", "ios_backup", "mtp"):
             return
         if method in ("comprehensive", "turbo"):
             try:
@@ -1288,8 +1300,10 @@ class _Handler(BaseHTTPRequestHandler):
     def _start_acquisition(self, body: Dict[str, Any]) -> Dict[str, Any]:
         from ..acquire.engine import AcquisitionEngine
 
+        # _build_acquire_plan already gates capability (device_name + lock_state
+        # + method) before resolving a live device, so an unsupported request
+        # never gets this far.
         case, plan, device, method = self._build_acquire_plan(body)
-        self._assert_acquire_supported(plan, method)
 
         label = f"{plan.exhibit_id} · {method}"
 
@@ -1360,7 +1374,9 @@ class _Handler(BaseHTTPRequestHandler):
             owner_identifiers=[s.strip() for s in
                                str(body.get("owner", "")).split(",") if s.strip()],
             owner_name=body.get("owner_name", "Device owner"),
-            turbo=bool(body.get("turbo", True)),
+            # See the matching comment in _build_acquire_plan: an omitted
+            # field must not silently disable deleted-record recovery.
+            turbo=bool(body.get("turbo", False)),
         )
         plan.validate()
 

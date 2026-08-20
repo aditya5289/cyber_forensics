@@ -905,20 +905,28 @@ seizure.</p>
             for h in (ents.get("high_value") or [])[:25])
 
         corr = intel.get("correlation") or {}
+        coloc = corr.get("colocation") or {}
         corr_html = ""
-        if corr.get("shared_party_count"):
+        if corr.get("shared_party_count") or coloc.get("encounter_count"):
             rows = "".join(
                 f"<tr><td>{e(p['best_label'])}</td>"
                 f"<td>{e(', '.join(p['exhibits']))}</td>"
                 f"<td>{sum(p['exhibits'].values())}</td>"
                 f"<td>{e(', '.join(p['deleted_on']) or '—')}</td></tr>"
-                for p in corr["shared_parties"][:20])
+                for p in corr.get("shared_parties", [])[:20])
+            coloc_para = (
+                f"""<p>{coloc['encounter_count']} co-location encounter(s) —
+                   devices placed in the same place at the same time, not
+                   merely the same cell — were also found; see the
+                   'colocation.rendezvous' finding(s) above for detail.</p>"""
+                if coloc.get("encounter_count") else "")
             corr_html = f"""
             <h3>Cross-exhibit correlation</h3>
             <p>Parties present on more than one exhibit, matched on an exact
                shared identifier. {corr.get('shared_media_count', 0)} byte-identical
                file(s) and {corr.get('shared_location_count', 0)} shared
                location cell(s) were also found.</p>
+            {coloc_para}
             <table><thead><tr><th>Party</th><th>Exhibits</th>
               <th>Artifacts</th><th>Deleted on</th></tr></thead>
               <tbody>{rows}</tbody></table>

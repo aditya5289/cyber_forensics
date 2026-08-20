@@ -14,6 +14,7 @@ import json
 import shutil
 import tempfile
 import unittest
+import unittest.mock
 from pathlib import Path
 
 from argus.core.selfcheck import (
@@ -206,10 +207,24 @@ class NoDeviceGuidance(unittest.TestCase):
             return real(name)
 
         detect.shutil.which = fake
+        # find_tool falls back to well-known install locations after PATH, so
+        # "absent" must also survive a machine that genuinely has adb (or
+        # libimobiledevice) unpacked at one of those locations — this ran on
+        # a workstation with a real adb.exe sitting at C:\platform-tools, and
+        # mocking shutil.which alone was not enough to simulate absence there.
+        key = detect._platform_key()
+        absent_tools = [t for t, present in
+                        (("adb", adb), ("idevice_id", idevice),
+                         ("ideviceinfo", idevice)) if not present]
+        saved = {t: detect.WELL_KNOWN[t][key] for t in absent_tools}
+        for t in absent_tools:
+            detect.WELL_KNOWN[t][key] = []
         try:
             return detect.detect_all()["diagnostics"]
         finally:
             detect.shutil.which = real
+            for t, candidates in saved.items():
+                detect.WELL_KNOWN[t][key] = candidates
 
     def test_import_advice_appears_exactly_once_in_every_state(self) -> None:
         for adb in (True, False):
@@ -275,15 +290,25 @@ class ToolDiscovery(unittest.TestCase):
         self.assertEqual(find_tool("python3") or "",
                          shutil_module.which("python3") or "")
 
+    def _adb_off_path(self, detect):
+        """Force find_tool's PATH lookup to miss, regardless of whether this
+        machine genuinely has an adb on PATH — the point of these tests is
+        the well-known-locations fallback, not this workstation's PATH."""
+        real = detect.shutil.which
+
+        def fake(name):
+            return None if name == "adb" else real(name)
+
+        return unittest.mock.patch.object(detect.shutil, "which", fake)
+
     def test_tool_off_path_is_still_found(self) -> None:
         import argus.devices.detect as detect
         target = self._fake_executable("adb")
         original = detect.WELL_KNOWN["adb"][detect._platform_key()]
         detect.WELL_KNOWN["adb"][detect._platform_key()] = [str(target)]
         try:
-            self.assertFalse(shutil.which("adb"),
-                             "fixture invalid: adb is genuinely on PATH here")
-            self.assertEqual(detect.find_tool("adb"), str(target))
+            with self._adb_off_path(detect):
+                self.assertEqual(detect.find_tool("adb"), str(target))
         finally:
             detect.WELL_KNOWN["adb"][detect._platform_key()] = original
 
@@ -298,7 +323,8 @@ class ToolDiscovery(unittest.TestCase):
         detect.WELL_KNOWN["adb"][detect._platform_key()] = [
             r"%NOT_A_REAL_VARIABLE%\adb.exe"]
         try:
-            self.assertEqual(detect.find_tool("adb"), "")
+            with self._adb_off_path(detect):
+                self.assertEqual(detect.find_tool("adb"), "")
         finally:
             detect.WELL_KNOWN["adb"][detect._platform_key()] = original
 

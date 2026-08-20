@@ -613,16 +613,19 @@ def cmd_intel(args, out: Out) -> int:
                         "yes" if h["validated"] else ""] for h in high[:20]])
 
     corr = result.get("correlation") or {}
-    if corr.get("shared_party_count"):
+    coloc = corr.get("colocation") or {}
+    if corr.get("shared_party_count") or coloc.get("encounter_count"):
         out.title("Cross-exhibit correlation")
-        out.kv("shared parties", corr["shared_party_count"])
+        out.kv("shared parties", corr.get("shared_party_count", 0))
         out.kv("shared media", corr.get("shared_media_count", 0))
         out.kv("shared locations", corr.get("shared_location_count", 0))
+        if coloc.get("encounter_count"):
+            out.kv("co-location encounters", coloc["encounter_count"])
         out.table(["Party", "Exhibits", "Artifacts", "Deleted on"],
                   [[p["best_label"], p["exhibit_count"],
                     sum(p["exhibits"].values()),
                     ", ".join(p["deleted_on"]) or "—"]
-                   for p in corr["shared_parties"][:15]])
+                   for p in corr.get("shared_parties", [])[:15]])
 
     comm = result.get("communities") or {}
     if comm.get("count"):

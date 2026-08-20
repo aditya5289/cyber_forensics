@@ -53,14 +53,14 @@ def preprocess_raw_tree(raw_root: Path,
             "limited_recovery": report.limited_recovery[:20],
             "thumbnail_caches": report.thumbnail_caches[:20],
             "reset_estimate": report.reset_estimate,
-            "indicator_count": report.indicator_count(),
+            "indicator_count": report.indicator_count,
         }
         af_path.write_text(json.dumps(payload, indent=1, ensure_ascii=False),
                            encoding="utf-8")
         summary["antiforensics"] = payload
-        if log and report.indicator_count():
+        if log and report.indicator_count:
             log("preprocess", "ok",
-                f"Antiforensics sweep — {report.indicator_count()} indicator(s): "
+                f"Antiforensics sweep — {report.indicator_count} indicator(s): "
                 f"{len(report.encrypted_stores)} encrypted, "
                 f"{len(report.suspect_apps)} suspect app(s), "
                 f"{len(report.vault_directories)} vault path(s)")

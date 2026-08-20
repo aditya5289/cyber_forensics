@@ -19,6 +19,7 @@ from __future__ import annotations
 import os
 import shutil
 import stat
+import sys
 import tempfile
 import unittest
 from pathlib import Path
@@ -61,14 +62,74 @@ if [ "$1" = "devices" ]; then echo "List of devices attached"; echo ""; exit 0; 
 exit 0
 """
 
+# Windows cannot execute a `#!/bin/sh` script directly — CreateProcess needs a
+# recognised extension (.bat) to know how to run a file at all, and without
+# one every _run() call fails with WinError 193 and is silently swallowed,
+# leaving detect_android() with nothing to parse. Same behaviour, batch
+# syntax, so the fixture actually exercises the pipeline on Windows instead
+# of vacuously no-op'ing.
+WIN_FAKE_ADB = """@echo off
+if "%1"=="version" (
+  echo Android Debug Bridge version 1.0.41
+  exit /b 0
+)
+if "%1"=="devices" (
+  echo List of devices attached
+  echo CPH2239xyz\tunauthorized usb:1-3 transport_id:2
+  echo SM991Babcd\tdevice usb:1-4 product:o1s model:SM_G991B device:o1s transport_id:3
+  echo pixel6zzz\toffline usb:2-1 transport_id:5
+  echo oldphone01\tno permissions usb:2-2
+  exit /b 0
+)
+if "%1"=="-s" (
+  if "%4"=="getprop" (
+    echo [ro.product.manufacturer]: [Samsung]
+    echo [ro.product.model]: [SM-G991B]
+    echo [ro.build.version.release]: [14]
+    echo [ro.board.platform]: [exynos2100]
+    echo [ro.crypto.state]: [encrypted]
+    exit /b 0
+  )
+  if "%4"=="dumpsys" (
+    echo   level: 87
+    exit /b 0
+  )
+  if "%4"=="which" exit /b 1
+)
+exit /b 0
+"""
+
+WIN_EMPTY_ADB = """@echo off
+if "%1"=="version" (
+  echo Android Debug Bridge version 1.0.41
+  exit /b 0
+)
+if "%1"=="devices" (
+  echo List of devices attached
+  echo.
+  exit /b 0
+)
+exit /b 0
+"""
+
+
+def _write_fake_adb(directory: Path, posix_source: str, win_source: str) -> Path:
+    """Write a fake adb executable in whichever form this OS can actually run."""
+    if sys.platform == "win32":
+        path = directory / "adb.bat"
+        path.write_text(win_source)
+        return path
+    path = directory / "adb"
+    path.write_text(posix_source)
+    path.chmod(path.stat().st_mode | stat.S_IEXEC)
+    return path
+
 
 class ScanAcrossStates(unittest.TestCase):
     @classmethod
     def setUpClass(cls) -> None:
         cls.dir = Path(tempfile.mkdtemp(prefix="argus-scan-"))
-        cls.adb = cls.dir / "adb"
-        cls.adb.write_text(FAKE_ADB)
-        cls.adb.chmod(cls.adb.stat().st_mode | stat.S_IEXEC)
+        cls.adb = _write_fake_adb(cls.dir, FAKE_ADB, WIN_FAKE_ADB)
         cls._real_find = detect.find_tool
         detect.find_tool = lambda name: str(cls.adb) if name == "adb" else ""
         cls.devices = detect.detect_android()
@@ -139,9 +200,7 @@ class AdbFoundOffPath(unittest.TestCase):
 
     def setUp(self) -> None:
         self.dir = Path(tempfile.mkdtemp(prefix="argus-offpath-"))
-        self.adb = self.dir / "adb"
-        self.adb.write_text(EMPTY_ADB)
-        self.adb.chmod(self.adb.stat().st_mode | stat.S_IEXEC)
+        self.adb = _write_fake_adb(self.dir, EMPTY_ADB, WIN_EMPTY_ADB)
 
     def tearDown(self) -> None:
         shutil.rmtree(self.dir, ignore_errors=True)
@@ -153,11 +212,12 @@ class AdbFoundOffPath(unittest.TestCase):
         self.assertNotIn('shutil.which("adb")', source)
 
     def test_scan_runs_with_adb_off_path(self) -> None:
+        # find_tool is fully replaced below, so this exercises "adb reports no
+        # devices", not the real PATH lookup — whether the real adb happens to
+        # be on this machine's PATH is irrelevant to what is under test here.
         real = detect.find_tool
         detect.find_tool = lambda name: str(self.adb) if name == "adb" else ""
         try:
-            self.assertFalse(shutil.which("adb"),
-                             "fixture invalid: adb is genuinely on PATH here")
             self.assertEqual(detect.detect_android(), [])
         finally:
             detect.find_tool = real
