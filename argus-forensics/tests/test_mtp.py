@@ -384,6 +384,51 @@ class DegradesQuietly(unittest.TestCase):
             mtp.available = real
 
 
+class DiskCounters(unittest.TestCase):
+    """Counting the destination is done while the copy is still running.
+
+    It used to cost one stat syscall per file on top of the directory walk,
+    so at a realistic file count the progress meter spent longer measuring
+    the tree than the transfer spent growing it. The counts themselves must
+    not change.
+    """
+
+    def _tree(self) -> Path:
+        root = Path(tempfile.mkdtemp(prefix="argus-count-"))
+        self.addCleanup(shutil.rmtree, root, ignore_errors=True)
+        (root / "a.jpg").write_bytes(b"x" * 100)
+        (root / "DCIM").mkdir()
+        (root / "DCIM" / "b.jpg").write_bytes(b"y" * 250)
+        (root / "DCIM" / "nested").mkdir()
+        (root / "DCIM" / "nested" / "c.mp4").write_bytes(b"z" * 999)
+        (root / "empty").mkdir()
+        return root
+
+    def test_counts_files_and_bytes_through_nested_directories(self) -> None:
+        stats = mtp._DiskStats(self._tree(), refresh_sec=0)
+        self.assertEqual(stats.snapshot(force=True), (3, 1349))
+
+    def test_argus_own_files_are_never_counted_as_evidence(self) -> None:
+        """The manifest and checkpoint live in the destination too."""
+        root = self._tree()
+        for name in mtp._SKIP_ARTIFACTS:
+            (root / name).write_bytes(b"q" * 77)
+        stats = mtp._DiskStats(root, refresh_sec=0)
+        self.assertEqual(stats.snapshot(force=True), (3, 1349))
+
+    def test_a_destination_that_does_not_exist_yet_is_zero_not_a_crash(self) -> None:
+        stats = mtp._DiskStats(Path(self._tree()) / "nope", refresh_sec=0)
+        self.assertEqual(stats.snapshot(force=True), (0, 0))
+
+    def test_the_cache_holds_until_the_refresh_interval(self) -> None:
+        root = self._tree()
+        stats = mtp._DiskStats(root, refresh_sec=3600)
+        first = stats.snapshot(force=True)
+        (root / "late.jpg").write_bytes(b"w" * 10)
+        self.assertEqual(stats.snapshot(), first)
+        self.assertEqual(stats.snapshot(force=True), (4, 1359))
+
+
 class StallDetection(unittest.TestCase):
     """A stall warning that fires during a healthy copy is a false statement.
 
