@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import time
 import unittest
 from unittest import mock
 
@@ -81,6 +82,68 @@ class TestScanDevices(unittest.TestCase):
         self.assertIn("elapsed_ms", report["scan"])
         self.assertIn("stages", report["scan"])
         self.assertEqual(report["ready_count"], 1)
+
+
+class TestScanConcurrency(unittest.TestCase):
+    """The scan claims to run its detectors in parallel; hold it to that.
+
+    The USB bus enumeration takes no input from the other detectors, but used
+    to run last and alone — and then a second time inside the diagnostics for
+    the no-device case, which is exactly when the examiner is already waiting.
+    """
+
+    DELAY = 0.4
+
+    def _slow(self, value, counter=None, key=""):
+        def run(*_a, **_k):
+            if counter is not None:
+                counter[key] = counter.get(key, 0) + 1
+            time.sleep(self.DELAY)
+            return value
+        return run
+
+    def _run_scan(self, counter=None):
+        with mock.patch("argus.devices.scan.detect_android",
+                        self._slow([])), \
+             mock.patch("argus.devices.scan.detect_ios", self._slow([])), \
+             mock.patch("argus.devices.scan._detect_mtp_devices",
+                        self._slow([])), \
+             mock.patch("argus.devices.bus.mobile_devices_on_bus",
+                        self._slow([], counter, "bus")), \
+             mock.patch("argus.devices.bus.fastboot_devices",
+                        return_value=[]), \
+             mock.patch("argus.devices.bus.volumes", return_value=[]):
+            start = time.perf_counter()
+            report = scan_devices(deep=True)
+            return report, time.perf_counter() - start
+
+    def test_the_bus_query_overlaps_the_other_detectors(self) -> None:
+        _report, elapsed = self._run_scan()
+        # android|ios|bus together, then mtp: two delays, not four.
+        self.assertLess(elapsed, self.DELAY * 3.5,
+                        "the bus enumeration is running serially again")
+
+    def test_the_bus_is_enumerated_once_not_twice(self) -> None:
+        counter: dict = {}
+        self._run_scan(counter)
+        self.assertEqual(counter["bus"], 1)
+
+    def test_each_stage_reports_its_own_duration(self) -> None:
+        """Timing from the main thread reported whichever stage was collected
+        second as taking no time at all."""
+        report, _elapsed = self._run_scan()
+        stages = {s["name"]: s["elapsed_ms"] for s in report["scan"]["stages"]}
+        floor = self.DELAY * 1000 * 0.5
+        for name in ("android", "ios", "mtp", "bus"):
+            self.assertGreater(stages[name], floor,
+                               f"{name} reported {stages[name]}ms for work "
+                               f"that took {self.DELAY * 1000:.0f}ms")
+
+    def test_every_stage_is_still_reported_in_order(self) -> None:
+        report, _elapsed = self._run_scan()
+        self.assertEqual(
+            [s["name"] for s in report["scan"]["stages"]],
+            ["toolchain", "android", "ios", "mtp", "bus", "merge"])
 
 
 if __name__ == "__main__":

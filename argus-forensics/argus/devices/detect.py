@@ -262,23 +262,81 @@ def _adb_props(serial: str, adb: str = "adb") -> Dict[str, str]:
     return props
 
 
-def _adb_imei(serial: str, adb: str = "adb") -> str:
-    for cmd in (
-        [adb, "-s", serial, "shell", "service", "call", "iphonesubinfo", "1"],
-        [adb, "-s", serial, "shell", "dumpsys", "iphonesubinfo"],
-    ):
-        out = _run(cmd)
+# Neither reliably answers across vendors and Android versions, so both are
+# tried in order and the first that yields a plausible IMEI wins.
+_IMEI_COMMANDS = (
+    "service call iphonesubinfo 1",
+    "dumpsys iphonesubinfo",
+)
+
+
+def _parse_imei(out: str) -> str:
+    """Pull an IMEI out of either reply shape, or return ''."""
+    # `service call` returns UTF-16 chunks inside parcel dumps
+    chunks = re.findall(r"'([^']*)'", out)
+    digits = "".join(re.sub(r"[^0-9]", "", c) for c in chunks)
+    if len(digits) >= 14:
+        return digits[:15]
+    m = re.search(r"Device ID\s*=\s*(\d{14,16})", out)
+    return m.group(1) if m else ""
+
+
+def _adb_imei(serial: str, adb: str = "adb", *,
+              probed: Optional[List[str]] = None) -> str:
+    """IMEI, from pre-batched replies when available.
+
+    On a handset where neither command answers — common enough — querying
+    separately costs two full timeouts before giving up. *probed* lets the
+    batched read supply both replies for the price of one round trip.
+    """
+    if probed is None:
+        probed = [_run([adb, "-s", serial, "shell", cmd])
+                  for cmd in _IMEI_COMMANDS]
+    for out in probed:
         if not out:
             continue
-        # `service call` returns UTF-16 chunks inside parcel dumps
-        chunks = re.findall(r"'([^']*)'", out)
-        digits = "".join(re.sub(r"[^0-9]", "", c) for c in chunks)
-        if len(digits) >= 14:
-            return digits[:15]
-        m = re.search(r"Device ID\s*=\s*(\d{14,16})", out)
-        if m:
-            return m.group(1)
+        found = _parse_imei(out)
+        if found:
+            return found
     return ""
+
+
+# One `adb shell` per field meant six USB round trips and six process spawns to
+# describe a single handset on top of getprop, each able to sit near
+# ADB_TIMEOUT on a sluggish device — and a deep scan pays that per device.
+# These are all independent one-shot reads, so they go down the wire together:
+# eight invocations per device becomes two.
+#
+# `;` rather than `&&`: an older toybox with no `which` must fail that section
+# alone, not silently truncate every field after it.
+_PROBE_MARK = "__ARGUS_FIELD__"
+
+_PROBE_COMMANDS = (
+    ("battery", "dumpsys battery"),
+    ("su", "which su"),
+    ("android_id", "settings get secure android_id"),
+    ("storage", "df -h /data"),
+    ("imei_0", _IMEI_COMMANDS[0]),
+    ("imei_1", _IMEI_COMMANDS[1]),
+)
+
+
+def _adb_probe_batch(serial: str, adb: str) -> Dict[str, str]:
+    """Read the one-shot device fields in a single shell invocation.
+
+    Returns ``{}`` if the output does not have the expected shape, so the
+    caller can fall back to querying each field separately rather than
+    reporting a device as featureless because one marker went missing.
+    """
+    script = f"; echo {_PROBE_MARK}; ".join(cmd for _, cmd in _PROBE_COMMANDS)
+    # The batch shares one timeout where the individual calls each had their
+    # own, so it is given more room than a single read would get.
+    out = _run([adb, "-s", serial, "shell", script], timeout=ADB_TIMEOUT + 15)
+    parts = out.split(_PROBE_MARK)
+    if not out or len(parts) != len(_PROBE_COMMANDS):
+        return {}
+    return {name: parts[i].strip()
+            for i, (name, _) in enumerate(_PROBE_COMMANDS)}
 
 
 def _build_android_device(serial: str, state: str, entry, adb: str,
@@ -317,13 +375,24 @@ def _build_android_device(serial: str, state: str, entry, adb: str,
 
     props = _adb_props(serial, adb)
     ident = android_identity_from_props(props)
-    battery_raw = _run([adb, "-s", serial, "shell", "dumpsys", "battery"])
+    probe = _adb_probe_batch(serial, adb)
+    if probe:
+        battery_raw = probe["battery"]
+        rooted = bool(probe["su"])
+        android_id = _first_line(probe["android_id"])
+        storage = _first_line(probe["storage"])
+    else:
+        battery_raw = _run([adb, "-s", serial, "shell", "dumpsys", "battery"])
+        rooted = bool(_run([adb, "-s", serial, "shell", "which", "su"]))
+        android_id = _first_line(_run(
+            [adb, "-s", serial, "shell", "settings", "get", "secure",
+             "android_id"]))
+        storage = _first_line(_run(
+            [adb, "-s", serial, "shell", "df", "-h", "/data"]))
+    imei = _adb_imei(
+        serial, adb,
+        probed=[probe["imei_0"], probe["imei_1"]] if probe else None)
     m = re.search(r"level:\s*(\d+)", battery_raw)
-    rooted = bool(_run([adb, "-s", serial, "shell", "which", "su"]))
-    android_id = _first_line(_run(
-        [adb, "-s", serial, "shell", "settings", "get", "secure", "android_id"]))
-    storage = _first_line(_run(
-        [adb, "-s", serial, "shell", "df", "-h", "/data"]))
     ident["android_id"] = android_id
     ident["storage_data"] = storage
     return DetectedDevice(
@@ -335,7 +404,7 @@ def _build_android_device(serial: str, state: str, entry, adb: str,
         os_version=ident["os_version"],
         build_id=ident["build_id"],
         chipset=ident["chipset"],
-        imei=_adb_imei(serial, adb),
+        imei=imei,
         lock_state="unlocked",
         rooted=rooted,
         encrypted=(ident.get("crypto_state") or "encrypted") == "encrypted",

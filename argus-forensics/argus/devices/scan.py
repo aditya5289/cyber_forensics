@@ -51,6 +51,33 @@ class ScanStage:
         }
 
 
+@dataclass
+class _Timed:
+    """A detector's result alongside how long that detector itself took."""
+
+    value: Any = None
+    elapsed_ms: int = 0
+    error: Optional[BaseException] = None
+
+
+def _timed(fn: Any, *args: Any) -> _Timed:
+    """Run *fn*, timing the call itself.
+
+    Timing a parallel stage from the main thread measures when its result was
+    collected, not how long it ran: whichever detector was read second had
+    already finished and was reported as taking ~0 ms. The clock belongs
+    inside the worker.
+    """
+    start = time.perf_counter()
+    try:
+        value, error = fn(*args), None
+    except Exception as exc:                              # pragma: no cover
+        value, error = None, exc
+    return _Timed(value=value,
+                  elapsed_ms=int((time.perf_counter() - start) * 1000),
+                  error=error)
+
+
 def _instance_id(serial: str) -> str:
     """USB instance id shared between adb serial and MTP shell paths."""
     frag = _serial_usb_fragment(serial)
@@ -276,13 +303,20 @@ def _enrich_from_bus(devices: List[DetectedDevice],
             "confidence", "full")
 
 
-def _bus_diagnostics() -> Tuple[List[str], int]:
-    """USB bus facts when no forensic tool answered."""
+def _bus_diagnostics(on_bus: Optional[List[Any]] = None
+                     ) -> Tuple[List[str], int]:
+    """USB bus facts when no forensic tool answered.
+
+    *on_bus* is the enumeration the scan already performed. Re-querying it
+    here meant a second full ``Get-PnpDevice`` sweep on exactly the path where
+    nothing was found — the one where the examiner is already waiting.
+    """
     diagnostics: List[str] = []
     bus_count = 0
     try:
         from .bus import fastboot_devices, mobile_devices_on_bus, volumes
-        on_bus = mobile_devices_on_bus()
+        if on_bus is None:
+            on_bus = mobile_devices_on_bus()
         bus_count = len(on_bus)
         in_fastboot = fastboot_devices()
         evidence_volumes = [v for v in volumes() if v.looks_like_evidence]
@@ -359,56 +393,52 @@ def scan_devices(*, deep: bool = True, refresh_adb: bool = False) -> Dict[str, A
     android: List[DetectedDevice] = []
     ios: List[DetectedDevice] = []
     mtp: List[DetectedDevice] = []
+    bus_hardware: List[Any] = []
+
+    def _scan_bus() -> List[Any]:
+        from .bus import mobile_devices_on_bus
+        return mobile_devices_on_bus()
+
+    def _stage(name: str, label: str, outcome: _Timed) -> ScanStage:
+        """Build a stage from a worker's own timing, not the collection order."""
+        stage = ScanStage(name=name, label=label,
+                          elapsed_ms=outcome.elapsed_ms)
+        if outcome.error is not None:                     # pragma: no cover
+            stage.status = "error"
+            stage.detail = str(outcome.error)
+        else:
+            stage.status = "done"
+            stage.count = len(outcome.value or [])
+        return stage
 
     with ThreadPoolExecutor(max_workers=3) as pool:
-        f_android = pool.submit(detect_android, deep)
-        f_ios = pool.submit(detect_ios)
-        futures = {"android": f_android, "ios": f_ios}
+        f_android = pool.submit(_timed, detect_android, deep)
+        f_ios = pool.submit(_timed, detect_ios)
+        # The bus query takes no input from the other detectors and is a
+        # read-only OS enumeration, so it has no reason to wait behind them —
+        # it used to run last, on its own, after everything else had finished.
+        f_bus = pool.submit(_timed, _scan_bus)
 
-        for key, fut in futures.items():
-            label = "Android (adb)" if key == "android" else "iOS (usbmux)"
-            stage = ScanStage(name=key, label=label, status="running")
-            t_stage = time.perf_counter()
-            try:
-                result = fut.result()
-                stage.status = "done"
-                stage.count = len(result)
-                if key == "android":
-                    android = result
-                else:
-                    ios = result
-            except Exception as exc:                  # pragma: no cover
-                stage.status = "error"
-                stage.detail = str(exc)
-            stage.elapsed_ms = int((time.perf_counter() - t_stage) * 1000)
-            stages.append(stage)
+        android_out, ios_out = f_android.result(), f_ios.result()
+        android = android_out.value or []
+        ios = ios_out.value or []
+        stages.append(_stage("android", "Android (adb)", android_out))
+        stages.append(_stage("ios", "iOS (usbmux)", ios_out))
 
-    t_mtp = time.perf_counter()
-    mtp_stage = ScanStage(name="mtp", label="MTP (file transfer)",
-                          status="running")
-    try:
-        mtp = _detect_mtp_devices(android + ios)
-        mtp_stage.status = "done"
-        mtp_stage.count = len(mtp)
-    except Exception as exc:                              # pragma: no cover
-        mtp_stage.status = "error"
-        mtp_stage.detail = str(exc)
-    mtp_stage.elapsed_ms = int((time.perf_counter() - t_mtp) * 1000)
-    stages.append(mtp_stage)
+        # MTP keys off what adb and usbmux already claimed, so it cannot start
+        # until those land. Running it here keeps it overlapped with the bus
+        # query still in flight rather than serialised after it.
+        mtp_out = _timed(_detect_mtp_devices, android + ios)
+        mtp = mtp_out.value or []
+        stages.append(_stage("mtp", "MTP (file transfer)", mtp_out))
 
-    t_bus = time.perf_counter()
-    bus_stage = ScanStage(name="bus", label="USB bus", status="running")
-    bus_hardware: List[Any] = []
-    try:
-        from .bus import mobile_devices_on_bus
-        bus_hardware = mobile_devices_on_bus()
-        bus_stage.status = "done"
-        bus_stage.count = len(bus_hardware)
-    except Exception as exc:                              # pragma: no cover
-        bus_stage.status = "error"
-        bus_stage.detail = str(exc)
-    bus_stage.elapsed_ms = int((time.perf_counter() - t_bus) * 1000)
-    stages.append(bus_stage)
+        bus_out = f_bus.result()
+        bus_hardware = bus_out.value or []
+        stages.append(_stage("bus", "USB bus", bus_out))
+    # An empty list means the bus was read and held nothing; a failed read
+    # means we do not know, and the diagnostics below should ask again rather
+    # than report "no hardware attached" on the strength of an exception.
+    bus_known = bus_out.error is None
 
     t_merge = time.perf_counter()
     combined = android + ios + mtp
@@ -427,7 +457,8 @@ def scan_devices(*, deep: bool = True, refresh_adb: bool = False) -> Dict[str, A
 
     diagnostics: List[str] = []
     if not merged:
-        bus_diag, _bus_count = _bus_diagnostics()
+        bus_diag, _bus_count = _bus_diagnostics(
+            bus_hardware if bus_known else None)
         diagnostics.extend(bus_diag)
         diagnostics.extend(_toolchain_diagnostics(tools))
     elif bus_hardware and not any(d.transport == "mtp" for d in merged):

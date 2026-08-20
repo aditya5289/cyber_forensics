@@ -22,6 +22,7 @@ import stat
 import sys
 import tempfile
 import unittest
+import unittest.mock
 from pathlib import Path
 
 import argus.devices.detect as detect
@@ -229,6 +230,127 @@ class AdbFoundOffPath(unittest.TestCase):
             self.assertEqual(detect.detect_android(), [])
         finally:
             detect.find_tool = real
+
+
+class BatchedFieldProbe(unittest.TestCase):
+    """Reading the one-shot fields in a single shell call, and the fallback.
+
+    Four separate `adb shell` invocations meant four USB round trips per
+    handset, each able to sit near the timeout on a sluggish device. Batching
+    them is only safe if a malformed reply degrades to the old behaviour
+    instead of describing the phone as featureless — so both paths are pinned
+    here, and pinned to agree.
+    """
+
+    IMEI_REPLY = "Result: Parcel(00000000 '3.5.9.1.2.3.4.5.6.7.8.9.0.1.2.')"
+
+    BATCH_REPLY = (
+        "  level: 87\n"
+        f"{detect._PROBE_MARK}\n"
+        "/system/xbin/su\n"
+        f"{detect._PROBE_MARK}\n"
+        "cafebabe12345678\n"
+        f"{detect._PROBE_MARK}\n"
+        "Filesystem  Size  Used Avail Use% Mounted on\n"
+        f"{detect._PROBE_MARK}\n"
+        f"{IMEI_REPLY}\n"
+        f"{detect._PROBE_MARK}\n"
+    )
+
+    def test_a_well_formed_reply_splits_into_every_field(self) -> None:
+        with unittest.mock.patch.object(detect, "_run",
+                                        return_value=self.BATCH_REPLY):
+            probe = detect._adb_probe_batch("SERIAL", "adb")
+        self.assertEqual(probe["battery"], "level: 87")
+        self.assertEqual(probe["su"], "/system/xbin/su")
+        self.assertEqual(probe["android_id"], "cafebabe12345678")
+        self.assertIn("Filesystem", probe["storage"])
+
+    def test_imei_falls_through_to_the_second_command(self) -> None:
+        """The first reply is empty on plenty of handsets; that is not a miss."""
+        self.assertEqual(
+            detect._adb_imei("S", "adb", probed=["", self.IMEI_REPLY]),
+            "359123456789012")
+
+    def test_imei_absent_from_both_replies_is_empty_not_invented(self) -> None:
+        self.assertEqual(detect._adb_imei("S", "adb", probed=["", ""]), "")
+        self.assertEqual(
+            detect._adb_imei("S", "adb", probed=["Result: Parcel(0)", "nope"]),
+            "")
+
+    def test_a_truncated_reply_is_refused_rather_than_misread(self) -> None:
+        """Two sections must not be read as six, silently blanking fields."""
+        truncated = f"  level: 87\n{detect._PROBE_MARK}\n/system/xbin/su\n"
+        with unittest.mock.patch.object(detect, "_run",
+                                        return_value=truncated):
+            self.assertEqual(detect._adb_probe_batch("SERIAL", "adb"), {})
+
+    def test_no_reply_at_all_is_refused(self) -> None:
+        with unittest.mock.patch.object(detect, "_run", return_value=""):
+            self.assertEqual(detect._adb_probe_batch("SERIAL", "adb"), {})
+
+    def test_one_missing_binary_does_not_truncate_the_rest(self) -> None:
+        """An older toybox has no `which`; that field alone should be empty."""
+        reply = self.BATCH_REPLY.replace("/system/xbin/su\n", "")
+        with unittest.mock.patch.object(detect, "_run", return_value=reply):
+            probe = detect._adb_probe_batch("SERIAL", "adb")
+        self.assertEqual(probe["su"], "")
+        self.assertEqual(probe["android_id"], "cafebabe12345678")
+        self.assertEqual(probe["battery"], "level: 87")
+
+    def test_the_commands_are_separated_so_one_failure_is_survivable(self) -> None:
+        sent = {}
+
+        def fake_run(cmd, timeout=0):
+            sent["script"] = cmd[-1]
+            return self.BATCH_REPLY
+
+        with unittest.mock.patch.object(detect, "_run", fake_run):
+            detect._adb_probe_batch("SERIAL", "adb")
+        # `&&` would let a missing binary swallow every later field.
+        self.assertNotIn("&&", sent["script"])
+        for _name, command in detect._PROBE_COMMANDS:
+            self.assertIn(command, sent["script"])
+
+    def test_batched_and_fallback_paths_describe_the_device_identically(self) -> None:
+        """The whole point: batching must not change what is reported."""
+        from argus.devices.diagnose import parse_devices
+
+        entry = parse_devices(
+            "List of devices attached\nSERIAL\tdevice model:SM_G991B\n")[0]
+        props = ("[ro.product.manufacturer]: [Samsung]\n"
+                 "[ro.product.model]: [SM-G991B]\n"
+                 "[ro.build.version.release]: [14]\n"
+                 "[ro.crypto.state]: [encrypted]\n")
+
+        def run_for(batch_works: bool):
+            def fake_run(cmd, timeout=0):
+                tail = cmd[-1]
+                if tail == "getprop":
+                    return props
+                if detect._PROBE_MARK in tail:
+                    return self.BATCH_REPLY if batch_works else ""
+                if tail == "battery":
+                    return "  level: 87"
+                if tail == "su":
+                    return "/system/xbin/su"
+                if tail == "android_id":
+                    return "cafebabe12345678"
+                if tail == "/data":
+                    return "Filesystem  Size  Used Avail Use% Mounted on"
+                if tail == detect._IMEI_COMMANDS[0]:
+                    return self.IMEI_REPLY
+                return ""
+
+            with unittest.mock.patch.object(detect, "_run", fake_run):
+                return detect._build_android_device(
+                    "SERIAL", "device", entry, "adb", deep=True)
+
+        batched, fallback = run_for(True), run_for(False)
+        self.assertEqual(batched.battery, 87)
+        self.assertTrue(batched.rooted)
+        self.assertEqual(batched.imei, "359123456789012")
+        self.assertEqual(batched.as_dict(), fallback.as_dict())
 
 
 if __name__ == "__main__":
