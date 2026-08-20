@@ -889,6 +889,8 @@ def _copy_parallel_subtrees(device_name: str, destination: Path,
     lock = threading.Lock()
     last_emit = 0.0
     last_files = -1
+    last_bytes = -1
+    last_growth = time.time()
     stop = threading.Event()
 
     def _live_expected() -> Tuple[int, int]:
@@ -899,22 +901,33 @@ def _copy_parallel_subtrees(device_name: str, destination: Path,
                 inventory.get("bytes", expected_bytes))
 
     def _emit_global(force: bool = False) -> None:
-        nonlocal last_emit, last_files
+        nonlocal last_emit, last_files, last_bytes, last_growth
         now = time.time()
         if not force and now - last_emit < 1.4:
             return
         files, nbytes = disk_stats.snapshot(force=force)
+        # Bytes count as movement too: one large file streaming in holds the
+        # file count flat for minutes while the transfer is perfectly healthy.
+        if files != last_files or nbytes != last_bytes:
+            last_growth = now
         if not force and files == last_files and now - last_emit < 8:
             return
         last_emit = now
         last_files = files
+        last_bytes = nbytes
         exp_files, exp_bytes = _live_expected()
         tot = _copy_progress_total(exp_files, files, jobs_done, jobs_total)
+        # Per-volume workers run quiet, so this board is the only line the
+        # examiner sees. Repeating it verbatim every 8s looks identical
+        # whether the copy is progressing or wedged — name the stall so the
+        # difference is visible without watching the clock.
+        stall = now - last_growth
+        elapsed = f"no new data for {int(stall)}s" if stall >= 30 else ""
         _emit_copy_progress(
             say, meter, files, tot, nbytes, max(exp_bytes, nbytes),
             _copy_progress_message(
                 files, exp_files, jobs_done=jobs_done,
-                jobs_total=jobs_total, meter=meter,
+                jobs_total=jobs_total, meter=meter, elapsed=elapsed,
                 bytes_cur=nbytes, bytes_total=max(exp_bytes, nbytes)),
             jobs_current=jobs_done, jobs_total=jobs_total)
         _save_checkpoint(destination, device_name, files=files,
