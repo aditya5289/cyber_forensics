@@ -429,6 +429,51 @@ class DiskCounters(unittest.TestCase):
         self.assertEqual(stats.snapshot(force=True), (4, 1359))
 
 
+class ContentLeavingTheDestination(unittest.TestCase):
+    """A file that arrives and then vanishes must not do so silently.
+
+    Taken from a live acquisition: the file count climbed 1,187 → 1,195 →
+    1,203 while the byte total went 997.3 MB → 1.04 GB → 997.7 MB. The 16
+    files that landed account for 410 KB between them; separately a ~68 MB
+    object appeared and was removed — one large video partially written, then
+    deleted when its transfer failed. Nothing recorded that it was attempted.
+    """
+
+    # The reconstructed byte figures from that run.
+    MB = 1024 ** 2
+    BEFORE = int(997.3 * MB)
+    PEAK = int(1.04 * 1024 ** 3)
+    AFTER = int(997.7 * MB)
+
+    def test_the_live_regression_is_caught(self) -> None:
+        note = mtp._shrink_note(1195, self.PEAK, 1203, self.AFTER)
+        self.assertTrue(note, "a 68 MB drop went unreported")
+        self.assertIn("1,195", note)
+        self.assertIn("1,203", note)
+
+    def test_a_shrink_is_reported_even_while_the_file_count_climbs(self) -> None:
+        """The whole trap: more files, fewer bytes, so counting files misses it."""
+        self.assertTrue(mtp._shrink_note(100, 900_000, 108, 100_000))
+
+    def test_normal_growth_is_not_an_event(self) -> None:
+        self.assertEqual(mtp._shrink_note(1187, self.BEFORE, 1195, self.PEAK), "")
+
+    def test_a_flat_poll_is_not_an_event(self) -> None:
+        self.assertEqual(mtp._shrink_note(1203, self.AFTER, 1203, self.AFTER), "")
+
+    def test_the_first_observation_has_nothing_to_compare_against(self) -> None:
+        self.assertEqual(mtp._shrink_note(-1, -1, 1187, self.BEFORE), "")
+
+    def test_a_vanished_file_at_steady_bytes_still_counts(self) -> None:
+        self.assertTrue(mtp._shrink_note(1203, self.AFTER, 1202, self.AFTER))
+
+    def test_the_note_points_at_reconciliation_rather_than_concluding(self) -> None:
+        """It must not assert the file was on the phone, only what was seen."""
+        note = mtp._shrink_note(1195, self.PEAK, 1203, self.AFTER)
+        self.assertIn("reconciliation", note)
+        self.assertNotIn("corrupt", note.lower())
+
+
 class StallDetection(unittest.TestCase):
     """A stall warning that fires during a healthy copy is a false statement.
 

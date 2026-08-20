@@ -878,6 +878,31 @@ def _run_copy_script(script: str, destination: Path, wait_expected: int,
     return out, err, landed_count, folder_warns
 
 
+def _shrink_note(last_files: int, last_bytes: int,
+                 files: int, nbytes: int) -> str:
+    """Describe content leaving the destination mid-copy, or return ''.
+
+    Content disappearing is not a progress update, it is an event. Explorer
+    deletes a partially written file when its transfer fails, so the bytes on
+    disk drop while the file count keeps climbing — a large video can arrive,
+    fail, and vanish between two polls with nothing to show it was ever
+    attempted. Whether the examiner hears about it otherwise depends on the
+    MTP inventory having listed it, and a stale inventory is precisely the
+    case where it would not.
+
+    A first observation (``last_files < 0``) has nothing to compare against
+    and is never a shrink.
+    """
+    if last_files < 0 or (files >= last_files and nbytes >= last_bytes):
+        return ""
+    return (f"Content left the destination during the copy: "
+            f"{last_files:,} → {files:,} file(s), "
+            f"{human_bytes(last_bytes)} → {human_bytes(nbytes)}. "
+            f"The usual cause is a transfer failing part-way and the partial "
+            f"file being removed. Any file the handset listed but did not "
+            f"deliver is named in the reconciliation below.")
+
+
 def _copy_parallel_subtrees(device_name: str, destination: Path,
                             jobs: List[Tuple[str, int]],
                             expected_total: int, expected_bytes: int,
@@ -909,6 +934,8 @@ def _copy_parallel_subtrees(device_name: str, destination: Path,
     last_files = -1
     last_bytes = -1
     last_growth = time.time()
+    shrink_events = 0
+    shrink_bytes = 0
     stop = threading.Event()
 
     def _live_expected() -> Tuple[int, int]:
@@ -920,10 +947,18 @@ def _copy_parallel_subtrees(device_name: str, destination: Path,
 
     def _emit_global(force: bool = False) -> None:
         nonlocal last_emit, last_files, last_bytes, last_growth
+        nonlocal shrink_events, shrink_bytes
         now = time.time()
         if not force and now - last_emit < 1.4:
             return
         files, nbytes = disk_stats.snapshot(force=force)
+        note = _shrink_note(last_files, last_bytes, files, nbytes)
+        if note:
+            shrink_events += 1
+            shrink_bytes += max(0, last_bytes - nbytes)
+            if shrink_events <= 3:
+                warnings.append(note)
+                say(note, phase="transfer", level="warning")
         # Bytes count as movement too: one large file streaming in holds the
         # file count flat for minutes while the transfer is perfectly healthy.
         if files != last_files or nbytes != last_bytes:
@@ -1023,6 +1058,13 @@ def _copy_parallel_subtrees(device_name: str, destination: Path,
 
     stop.set()
     watcher.join(timeout=5)
+    if shrink_events > 3:
+        warnings.append(
+            f"Content left the destination {shrink_events:,} time(s) during "
+            f"this copy, {human_bytes(shrink_bytes)} in total across all "
+            f"occurrences (the first three are itemised above). Repeated "
+            f"removals point at the transfer failing rather than at one "
+            f"awkward file.")
     landed_total = _count_files(destination)
     return warnings, errors, landed_total
 
