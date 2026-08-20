@@ -17,12 +17,13 @@ import mimetypes
 import socket
 import threading
 import webbrowser
-from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
+from http.server import BaseHTTPRequestHandler
 from pathlib import Path
 from typing import Any, Callable, Dict, List, Optional, Tuple
 from urllib.parse import parse_qs, unquote, urlparse
 
 from ..analyze.session import AnalysisSession
+from ._http import TolerantThreadingHTTPServer
 
 UI_DIR = Path(__file__).resolve().parent.parent / "ui"
 # The analyst surface. `xamn.html` is kept and still served at /xamn.html so an
@@ -285,7 +286,7 @@ def serve(containers: List[Path | str], host: str = "127.0.0.1",
                               tz_offset_minutes=tz_offset_minutes)
     _Handler.session = session
     port = _free_port(port)
-    httpd = ThreadingHTTPServer((host, port), _Handler)
+    httpd = TolerantThreadingHTTPServer((host, port), _Handler)
 
     url = f"http://{host}:{port}/"
     overview = session.overview()

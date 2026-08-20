@@ -34,7 +34,7 @@ import sys
 import threading
 import webbrowser
 from datetime import datetime, timezone
-from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
+from http.server import BaseHTTPRequestHandler
 from pathlib import Path
 from typing import Any, Callable, Dict, List, Optional
 from urllib.parse import parse_qs, unquote, urlparse
@@ -47,6 +47,7 @@ from ..core.errors import ArgusError, AcquisitionError
 from ..core.models import Category
 from ..devices.detect import detect_all, toolchain_status
 from ..devices.manual import DeviceManual, LOCK_STATES
+from ._http import TolerantThreadingHTTPServer
 from .jobs import Job, JobRunner
 
 UI_DIR = Path(__file__).resolve().parent.parent / "ui"
@@ -412,28 +413,6 @@ def _wb_suggest(session: AnalysisSession) -> Dict[str, Any]:
     merged["app"] = list(overview.get("applications", {}))[:40]
     merged["tag"] = [t["name"] for t in session.list_tags()]
     return merged
-
-
-class _WorkbenchServer(ThreadingHTTPServer):
-    """ThreadingHTTPServer that doesn't dump a traceback for a client that
-    simply went away.
-
-    A browser tab closing or refreshing mid-poll aborts the connection while
-    socketserver is still reading the request line — before ``_Handler`` gets
-    a chance to run, so none of its own try/except blocks around
-    BrokenPipeError/ConnectionResetError/ConnectionAbortedError apply. Left
-    alone, the default handle_error prints a full traceback to stderr for
-    every one of these, which on a workbench doing long-polling for job logs
-    happens constantly and is not a server fault.
-    """
-
-    def handle_error(self, request, client_address) -> None:
-        exc_type = sys.exc_info()[0]
-        if exc_type is not None and issubclass(
-                exc_type, (BrokenPipeError, ConnectionResetError,
-                          ConnectionAbortedError)):
-            return
-        super().handle_error(request, client_address)
 
 
 # ----------------------------------------------------------------- handler
@@ -1752,7 +1731,7 @@ def serve(workspace: Path | str = "~/ARGUS", port: int = 8742,
     wb = Workbench(Path(workspace), token)
     _Handler.wb = wb
     port = _free_port(port)
-    httpd = _WorkbenchServer(("127.0.0.1", port), _Handler)
+    httpd = TolerantThreadingHTTPServer(("127.0.0.1", port), _Handler)
     url = f"http://127.0.0.1:{port}/#token={token}"
 
     if ready_json:
