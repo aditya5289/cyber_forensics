@@ -1083,9 +1083,15 @@ def wait_for_authorized_adb(log: Optional[Callable[..., None]] = None,
                     "Developer options → USB debugging ON"
                 )
                 if not vivo_hint:
+                    # First-time setup on an unfamiliar phone eats most of the
+                    # window just finding the toggle, so the one-time hint
+                    # covers both "Developer options isn't even visible yet"
+                    # and the Vivo/iQOO-specific extra switch.
                     msg += (
-                        ". Vivo/Y02: also turn on USB debugging (Security settings), "
-                        "keep File transfer mode, unlock screen, tap Allow"
+                        " (if Developer options isn't shown: Settings → "
+                        "About phone → tap Build number 7×). Vivo/Y02: also "
+                        "turn on USB debugging (Security settings), keep "
+                        "File transfer mode, unlock screen, tap Allow"
                     )
                     vivo_hint = True
                 msg += f" ({remaining}s remaining)."

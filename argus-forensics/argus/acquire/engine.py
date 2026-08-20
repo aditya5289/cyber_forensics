@@ -688,7 +688,11 @@ class AcquisitionEngine:
                         level="warning")
                 adb_res = android_adb.acquire_communications(
                     raw_root, categories=plan.categories, log=log,
-                    wait_seconds=180, force_comms=True)
+                    # 180s was routinely too tight for an examiner enabling
+                    # Developer options and USB debugging for the first time
+                    # on a phone they don't own — finding the toggle alone
+                    # can eat most of that window.
+                    wait_seconds=300, force_comms=True)
                 if adb_res.pulled:
                     report.files_acquired += len(adb_res.pulled)
                     report.bytes_acquired += adb_res.bytes_total
