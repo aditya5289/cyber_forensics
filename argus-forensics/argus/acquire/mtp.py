@@ -1126,15 +1126,104 @@ def _powershell_start(script: str,
     return None, "PowerShell is not available"
 
 
+def backend() -> str:
+    """Which MTP transport this host can use: windows-shell, gvfs, libmtp, or ''."""
+    if sys.platform.startswith("win"):
+        return "windows-shell"
+    if _unix_mtp_mounts():
+        return "gvfs"
+    if shutil.which("gio") or shutil.which("mtp-detect") or shutil.which("simple-mtpfs"):
+        return "libmtp"
+    return ""
+
+
 def available() -> bool:
     """Is MTP acquisition possible on this platform?"""
-    return sys.platform.startswith("win")
+    return bool(backend())
+
+
+_UNIX_VOLUME_MARKERS = (
+    "dcim", "android", "whatsapp", "download", "pictures", "movies",
+    "music", "documents", "internal storage", "sd card",
+)
+_UNIX_VOLUME_SKIP = {
+    "macintosh hd", "untitled", "data", "system", "preboot", "recovery",
+    "vm", "windows", "efi", "boot", "home",
+}
+
+
+def _unix_looks_like_phone_storage(root: Path) -> bool:
+    """True when a directory looks like Android shared storage, not a local disk."""
+    try:
+        names = {p.name.lower() for p in root.iterdir()}
+    except OSError:
+        return False
+    return any(marker in names or any(marker in n for n in names)
+               for marker in _UNIX_VOLUME_MARKERS)
+
+
+def _unix_mtp_mounts() -> List[MTPDevice]:
+    """GVFS / libmtp / Android File Transfer mounts on Linux and macOS."""
+    mounts: List[MTPDevice] = []
+    seen: set[str] = set()
+    bases: List[Path] = []
+    if hasattr(os, "getuid"):
+        bases.append(Path(f"/run/user/{os.getuid()}/gvfs"))
+    bases.append(Path.home() / ".gvfs")
+    bases.append(Path("/Volumes"))
+    for base in bases:
+        if not base.is_dir():
+            continue
+        try:
+            children = list(base.iterdir())
+        except OSError:
+            continue
+        for child in children:
+            if not child.is_dir():
+                continue
+            low = child.name.lower()
+            gvfs_mtp = low.startswith("mtp:") or "mtp:host=" in low or low.startswith("mtp;")
+            volume = base.name == "Volumes"
+            if volume:
+                if low in _UNIX_VOLUME_SKIP or low.startswith("com."):
+                    continue
+                if not _unix_looks_like_phone_storage(child):
+                    continue
+            elif not gvfs_mtp and not _unix_looks_like_phone_storage(child):
+                continue
+            try:
+                key = str(child.resolve())
+            except OSError:
+                key = str(child)
+            if key in seen:
+                continue
+            seen.add(key)
+            display = child.name
+            if "mtp:host=" in display.lower():
+                display = display.split("mtp:host=", 1)[-1]
+            mounts.append(MTPDevice(name=display, path=key))
+    return mounts
+
+
+def _unix_match_device(device_name: str) -> Optional[MTPDevice]:
+    want = (device_name or "").strip().lower()
+    found = _unix_mtp_mounts()
+    if not want:
+        return found[0] if found else None
+    for dev in found:
+        name = dev.name.lower()
+        path = (dev.path or "").lower()
+        if name == want or want in name or name in want or want in path:
+            return dev
+    return found[0] if len(found) == 1 else None
 
 
 def devices() -> List[MTPDevice]:
-    """Handsets mounted in the shell namespace (This PC)."""
+    """Handsets mounted in the shell namespace (This PC) or GVFS/libmtp."""
     if not available():
         return []
+    if not sys.platform.startswith("win"):
+        return _unix_mtp_mounts()
     out, _err = _powershell(_ENUMERATE_DEVICES, timeout=60)
     found: List[MTPDevice] = []
     for line in out.splitlines():
@@ -1154,6 +1243,18 @@ def list_volumes(device_name: str) -> List[str]:
     """Top-level storage roots the phone exposes (Internal storage, SD card)."""
     if not available() or not device_name:
         return []
+    if not sys.platform.startswith("win"):
+        mount = _unix_match_device(device_name)
+        if not mount:
+            return []
+        names: List[str] = []
+        try:
+            for child in Path(mount.path).iterdir():
+                if child.is_dir():
+                    names.append(child.name)
+        except OSError:
+            return [mount.name]
+        return names or [mount.name]
     script = _LIST_VOLUMES.replace("__DEVICE__", _ps_quote(device_name))
     out, _err = _powershell(script, timeout=60)
     names: List[str] = []
@@ -1519,6 +1620,103 @@ def _sha256(path: Path) -> str:
     return digest.hexdigest()
 
 
+def _acquire_unix(device_name: str, destination: Path,
+                  result: AcquisitionResult,
+                  progress: Optional[Callable[[str], None]],
+                  *, hash_files: bool, resume: bool,
+                  turbo: bool) -> AcquisitionResult:
+    """Copy from a GVFS / Android File Transfer mount — hashed, with shortfall."""
+    mount = _unix_match_device(device_name)
+    if not mount:
+        result.warnings.append(
+            "No MTP mount visible. On Linux install gvfs-mtp or libmtp and "
+            "unlock the phone on File transfer. On macOS open Android File "
+            "Transfer, then retry.")
+        result.finished_at = time.strftime("%Y-%m-%dT%H:%M:%S%z")
+        return result
+    src = Path(mount.path)
+    result.method_note = (
+        METHOD_NOTE + " Copied from a desktop MTP mount (GVFS/libmtp/"
+        "Android File Transfer), not the Windows Shell namespace.")
+    result.volumes = [p.name for p in src.iterdir() if p.is_dir()] or [mount.name]
+    meter = ProgressMeter()
+
+    def say(message: str, **extra: Any) -> None:
+        if not progress:
+            return
+        if extra.get("phase"):
+            meter.set_phase(str(extra.pop("phase")))
+        snap = meter.snapshot(
+            current=int(extra.get("progress_current", 0)),
+            total=int(extra.get("progress_total", 0)),
+            bytes_current=int(extra.get("bytes_current", 0)),
+            bytes_total=int(extra.get("bytes_total", 0)),
+            message=message)
+        snap.pop("message", None)
+        snap.update(extra)
+        try:
+            progress(message, **snap)
+        except TypeError:
+            progress(message)
+
+    say(f"Copying from MTP mount {mount.name}…", phase="transfer")
+    listed = 0
+    copied = 0
+    nbytes = 0
+    expected: Dict[str, int] = {}
+    for dirpath, _dirnames, filenames in os.walk(src):
+        for name in filenames:
+            if name in _SKIP_ARTIFACTS:
+                continue
+            remote = Path(dirpath) / name
+            try:
+                rel = remote.relative_to(src).as_posix()
+                size = remote.stat().st_size
+            except OSError:
+                continue
+            listed += 1
+            expected[rel] = size
+            local = destination / rel.replace("/", os.sep)
+            if resume and local.is_file():
+                try:
+                    if local.stat().st_size == size:
+                        copied += 1
+                        nbytes += size
+                        continue
+                except OSError:
+                    pass
+            local.parent.mkdir(parents=True, exist_ok=True)
+            try:
+                shutil.copy2(remote, local)
+                copied += 1
+                nbytes += size
+                if hash_files and not turbo:
+                    digest = _sha256(local)
+                    if digest:
+                        result.hashes[rel] = digest
+            except OSError as exc:
+                result.missing.append({"path": rel, "size": size,
+                                       "reason": str(exc)[:200]})
+            if listed == 1 or listed % 250 == 0:
+                say(f"Copying… {copied:,} of {listed:,} file(s)",
+                    phase="transfer",
+                    progress_current=copied, progress_total=max(listed, 1),
+                    bytes_current=nbytes)
+    arrived = _index_arrived(destination)
+    for rel, size in expected.items():
+        if rel not in arrived and not any(
+                m.get("path") == rel for m in result.missing):
+            result.missing.append({"path": rel, "size": size,
+                                   "reason": "not on disk after copy"})
+    result.files_listed = listed
+    result.files_copied = len(arrived)
+    result.bytes_copied = nbytes
+    result.finished_at = time.strftime("%Y-%m-%dT%H:%M:%S%z")
+    say(f"Done: {result.files_copied} file(s) from {mount.name}.",
+        phase="verify")
+    return result
+
+
 def acquire(device_name: str, destination: Path | str,
             progress: Optional[Callable[[str], None]] = None,
             hash_files: bool = True,
@@ -1534,11 +1732,16 @@ def acquire(device_name: str, destination: Path | str,
 
     if not available():
         result.warnings.append(
-            "MTP acquisition is implemented for Windows only. On Linux or "
-            "macOS, mount the handset with your desktop's MTP support and "
-            "import the mounted path instead.")
+            "MTP acquisition is implemented for Windows Shell, Linux GVFS/"
+            "libmtp, and macOS Android File Transfer mounts. mount the handset "
+            "and retry, or enable USB debugging for ADB.")
         result.finished_at = time.strftime("%Y-%m-%dT%H:%M:%S%z")
         return result
+
+    if not sys.platform.startswith("win"):
+        return _acquire_unix(
+            device_name, destination, result, progress,
+            hash_files=hash_files, resume=resume, turbo=turbo)
 
     meter = ProgressMeter()
 

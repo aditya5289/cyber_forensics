@@ -35,6 +35,19 @@ class TestWhatsAppCrypt(unittest.TestCase):
     def test_crypt15_no_key_returns_none(self) -> None:
         self.assertIsNone(wc.decrypt_crypt15(b"\x00" * 512))
 
+    def test_output_root_keeps_source_intact(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            crypt_dir = root / "WhatsApp" / "Databases"
+            crypt_dir.mkdir(parents=True)
+            (crypt_dir / "msgstore.db.crypt14").write_bytes(b"\x00" * 256)
+            dest = root / "out"
+            dest.mkdir()
+            summary = wc.decrypt_whatsapp_backups(
+                root, recovery_key="", passphrase="", output_root=dest)
+            self.assertEqual(summary.attempted, 1)
+            self.assertFalse(any(crypt_dir.glob("*.db")))
+
     def test_find_crypt_and_key_in_tree(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
             root = Path(tmp)

@@ -639,9 +639,13 @@ class AcquisitionEngine:
                 label = ((dev.raw or {}).get("mtp_name")
                          or dev.marketing_name or dev.name or dev.model)
                 if not mtp.available():
+                    kind = mtp.backend()
                     raise AcquisitionError(
-                        "MTP acquisition requires Windows. Mount the handset "
-                        "and import the folder, or enable USB debugging for ADB.")
+                        "No MTP backend on this host. On Windows use File "
+                        "transfer. On Linux install gvfs-mtp/libmtp and unlock "
+                        "the phone. On macOS open Android File Transfer. Or "
+                        "enable USB debugging for ADB."
+                        + (f" (backend={kind})" if kind else ""))
                 if self._monitor:
                     self._monitor.stop()
                 self._monitor = MtpExtractionMonitor(

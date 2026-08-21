@@ -69,7 +69,9 @@ def analyse(session: Any, owner_name: str = "Device owner",
             include_fusion: bool = True,
             include_conversations: bool = True,
             hashset_registry: Any = None,
-            progress: Optional[Callable[[str], None]] = None) -> Dict[str, Any]:
+            progress: Optional[Callable[[str], None]] = None,
+            force_media: bool = False,
+            force_fusion: bool = False) -> Dict[str, Any]:
     """Run the full intelligence layer over an :class:`AnalysisSession`."""
     from ..analyze.conversations import (build_conversations,
                                          conversation_findings)
@@ -83,6 +85,22 @@ def analyse(session: Any, owner_name: str = "Device owner",
     if progress:
         progress("Loading artifacts from sealed containers…")
     per_exhibit, artifacts = _load_artifacts(session, progress)
+    scale_notes: List[str] = []
+    large = len(artifacts) >= 150_000
+    huge = len(artifacts) >= 400_000
+    if large and include_media_matching and not force_media:
+        include_media_matching = False
+        scale_notes.append(
+            f"Perceptual media matching skipped — {len(artifacts):,} artifacts "
+            f"(threshold 150,000). Re-run intelligence with force_media.")
+    if huge and include_fusion and not force_fusion:
+        include_fusion = False
+        scale_notes.append(
+            f"Event fusion skipped — {len(artifacts):,} artifacts "
+            f"(threshold 400,000). Re-run with force_fusion.")
+    if scale_notes and progress:
+        for note in scale_notes:
+            progress(note)
 
     contacts = [a for a in artifacts if a.category == Category.CONTACT]
 
@@ -92,7 +110,15 @@ def analyse(session: Any, owner_name: str = "Device owner",
     extractor.set_owner_identifiers(owner_identifiers)
     extractor.set_known_contacts(
         p.normalised() for a in contacts for p in a.participants)
-    extractor.scan_artifacts(artifacts)
+    batch = _ARTIFACT_BATCH
+    if len(artifacts) > batch:
+        for i in range(0, len(artifacts), batch):
+            extractor.scan_artifacts(artifacts[i:i + batch])
+            if progress:
+                progress(f"Entities {min(i + batch, len(artifacts)):,}/"
+                         f"{len(artifacts):,}")
+    else:
+        extractor.scan_artifacts(artifacts)
 
     graph = ConnectionGraph(owner_label=owner_name)
     graph.learn_contacts(contacts)
@@ -223,6 +249,7 @@ def analyse(session: Any, owner_name: str = "Device owner",
         "exhibits": [label for label, _ in per_exhibit],
         "artifacts_analysed": len(artifacts),
         "recommendations": recommendations,
+        "scale_notes": scale_notes,
     }
 
 

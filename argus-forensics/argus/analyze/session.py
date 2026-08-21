@@ -1261,14 +1261,17 @@ class AnalysisSession:
 
     def intelligence(self, owner_identifiers: Optional[List[str]] = None,
                      hashset_registry: Any = None,
-                     progress: Optional[Any] = None) -> Dict[str, Any]:
+                     progress: Optional[Any] = None,
+                     force_media: bool = False,
+                     force_fusion: bool = False) -> Dict[str, Any]:
         """Findings, entities, correlation and community structure.
 
         Cached per session: the rules walk every artifact several times, and an
         examiner switching between views should not pay for that repeatedly.
         """
         key = (tuple(sorted(owner_identifiers or ())),
-               id(hashset_registry) if hashset_registry is not None else 0)
+               id(hashset_registry) if hashset_registry is not None else 0,
+               bool(force_media), bool(force_fusion))
         cached = getattr(self, "_intel_cache", {}).get(key)
         if cached is not None and progress is None:
             return cached
@@ -1276,7 +1279,9 @@ class AnalysisSession:
         result = analyse(self, owner_name=self.owner_label,
                          owner_identifiers=owner_identifiers or [],
                          hashset_registry=hashset_registry,
-                         progress=progress)
+                         progress=progress,
+                         force_media=force_media,
+                         force_fusion=force_fusion)
         if not hasattr(self, "_intel_cache"):
             self._intel_cache = {}
         self._intel_cache[key] = result

@@ -2135,12 +2135,16 @@ async function viewExtract(m) {
         <span class="help">Comma separated. Lets ARGUS tell the device owner
           apart from their contacts in the connection graph.</span></div>
       <div class="field"><label>Backup password</label>
-        <input id="ePw" type="password" placeholder="iOS/Android encrypted backup"></div>
+        <input id="ePw" type="password" placeholder="iOS/Android encrypted backup (.ab / iTunes)"></div>
       <div class="field"><label>WhatsApp E2E recovery key</label>
         <input id="eWaKey" placeholder="64 hex digits from WhatsApp → Chats → Backup"
           spellcheck="false" autocomplete="off">
         <span class="help">Required for <code>msgstore.db.crypt15</code> when no device key
           was pulled. Also accepts spaced groups of digits from a screenshot.</span></div>
+      <div class="field"><label>WhatsApp backup passphrase</label>
+        <input id="eWaPass" type="password" placeholder="crypt15 password — not the iOS backup password">
+        <span class="help">End-to-end backup password set in WhatsApp. Separate from
+          iTunes / Android backup encryption.</span></div>
     </div>
 
     <h2>Recovery options</h2>
@@ -2223,7 +2227,7 @@ async function viewExtract(m) {
       source_path: liveMethod === "import" ? ($("#eSrc")?.value.trim() || "") : "",
       backup_password: $("#ePw").value,
       whatsapp_recovery_key: $("#eWaKey")?.value?.trim() || "",
-      whatsapp_passphrase: $("#ePw").value || "",
+      whatsapp_passphrase: $("#eWaPass")?.value || "",
       owner: $("#eOwner").value.trim(),
       recover_deleted: $("#eCarve").checked,
       carve_confidence: parseFloat($("#eConf").value) || 0.45,
@@ -3227,6 +3231,7 @@ function renderJobResult(j) {
       <button class="btn sm" id="copyContainerPath">Copy path</button>
       <button class="btn" id="goAnalyse">Analyse this extraction →</button>
       <button class="btn" id="goIntel">Run intelligence →</button>
+      <button class="btn" id="goDecrypt">Decrypt WhatsApp →</button>
       <button class="btn" id="goAgain">Run another extraction</button></div>`;
   $("#openZip")?.addEventListener("click", () => openContainerFolder(r.export_zip));
   $("#openContainer")?.addEventListener("click", () => openContainerFolder(r.container));
@@ -3246,6 +3251,11 @@ function renderJobResult(j) {
     S.containers = (S.caseOverview?.extractions || []).map(x => x.path);
     if (!S.containers.length && r.container) S.containers = [r.container];
     S.view = "findings"; S.intel = null; renderNav(); route(); };
+  if ($("#goDecrypt")) $("#goDecrypt").onclick = () => {
+    S.view = "findings"; S.containers = r.container ? [r.container] : S.containers;
+    renderNav(); route();
+    setTimeout(() => $("#waKey")?.focus(), 400);
+  };
   if ($("#goAgain")) $("#goAgain").onclick = () => { S.view = "extract"; route(); };
   if (r.container) {
     api(`dashboard?containers=${encodeURIComponent(r.container)}`).then(dash => {
@@ -3401,6 +3411,20 @@ async function viewFindings(m) {
         value="${esc(S.owner)}" spellcheck="false">
       <button class="btn primary" id="fRun">Analyse</button>
     </div>
+    <h2>WhatsApp encrypted backup</h2>
+    <p class="lede" style="margin-bottom:10px">Decrypt <code>.crypt12/14/15</code> after
+      extraction without modifying the sealed original. A new supplement container
+      is created on the same exhibit.</p>
+    <div class="grid" style="max-width:720px;margin-bottom:16px">
+      <div class="field"><label>64-digit recovery key</label>
+        <input id="waKey" spellcheck="false" placeholder="Paste from WhatsApp → Chats → Chat backup"></div>
+      <div class="field"><label>crypt15 passphrase</label>
+        <input id="waPass" type="password" placeholder="WhatsApp end-to-end backup password"></div>
+    </div>
+    <div class="actions" style="margin-bottom:18px">
+      <button class="btn" id="waDecrypt">Decrypt into new exhibit container</button>
+      <span class="muted" id="waDecryptMsg"></span>
+    </div>
     <h2>Hash-set screening</h2>
     <p class="lede" style="margin-bottom:10px">Load NSRL or known-bad lists to
       flag or suppress artifacts during analysis. Nothing is deleted — hits are
@@ -3423,6 +3447,41 @@ async function viewFindings(m) {
   </div>`;
   $("#fRun").onclick = () => { S.owner = $("#fOwner").value.trim();
     S.intel = null; loadFindings(); };
+  $("#waDecrypt")?.addEventListener("click", async () => {
+    const container = (S.containers || [])[0];
+    if (!container) {
+      toast("Select an extraction first", { type: "bad" });
+      return;
+    }
+    const btn = $("#waDecrypt");
+    btn.disabled = true;
+    $("#waDecryptMsg").textContent = "Starting decrypt…";
+    try {
+      const r = await post("decrypt/whatsapp", {
+        container,
+        case_path: S.casePath,
+        password: S.casePassword,
+        whatsapp_recovery_key: $("#waKey")?.value?.trim() || "",
+        whatsapp_passphrase: $("#waPass")?.value || "",
+        operator: S.operator || "",
+      });
+      watchJob(r.job_id, "fOut", async (j) => {
+        await refreshCase();
+        const wa = (j.result || {}).whatsapp_decrypt || {};
+        $("#waDecryptMsg").textContent =
+          `Decrypted ${wa.decrypted || 0}/${wa.attempted || 0}` +
+          ((j.result || {}).supplement_container ? " — new container sealed" : "");
+        toast("WhatsApp decrypt finished — original sealed container unchanged",
+              { type: "ok" });
+        S.intel = null;
+        loadFindings();
+      });
+    } catch (e) {
+      $("#waDecryptMsg").textContent = e.message;
+      toast(e.message, { type: "bad" });
+    }
+    btn.disabled = false;
+  });
   $("#hsBrowseGood").onclick = () => openBrowser({
     title: "Choose known-good hash set",
     allowFiles: true,
@@ -3522,6 +3581,11 @@ function renderFindings(intel) {
     <div class="sevbox"><div class="n">${f.rules_run}</div>
       <div class="l">rules run</div></div>
   </div>`;
+
+  if ((intel.scale_notes || []).length) {
+    html += (intel.scale_notes || []).map(n =>
+      `<div class="note warn">${esc(n)}</div>`).join("");
+  }
 
   if (!f.count) {
     html += `<div class="note"><b>No rule produced a finding</b>

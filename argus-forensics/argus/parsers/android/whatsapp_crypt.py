@@ -197,14 +197,26 @@ def decrypt_crypt15(encrypted: bytes, *,
 
 def _write_decrypted(root: Path, crypt_path: Path, plain: bytes,
                      result: DecryptResult, summary: DecryptSummary,
-                     log: Optional[Callable[..., None]]) -> None:
+                     log: Optional[Callable[..., None]],
+                     output_root: Optional[Path] = None) -> None:
     out_name = crypt_path.name.rsplit(".crypt", 1)[0]
     if not out_name.endswith(".db"):
         out_name += ".db"
-    out_path = crypt_path.with_name(out_name)
+    if output_root:
+        try:
+            rel = crypt_path.parent.resolve().relative_to(root.resolve())
+        except ValueError:
+            rel = Path(".")
+        dest_dir = Path(output_root) / rel
+        dest_dir.mkdir(parents=True, exist_ok=True)
+        out_path = dest_dir / out_name
+        rel_root = Path(output_root)
+    else:
+        out_path = crypt_path.with_name(out_name)
+        rel_root = root
     if out_path.exists() and out_path.stat().st_size > 0:
         result.ok = True
-        result.output = _rel_path(root, out_path)
+        result.output = _rel_path(rel_root, out_path)
         result.message = "already decrypted"
         result.bytes_out = out_path.stat().st_size
         summary.decrypted += 1
@@ -212,7 +224,7 @@ def _write_decrypted(root: Path, crypt_path: Path, plain: bytes,
     try:
         out_path.write_bytes(plain)
         result.ok = True
-        result.output = _rel_path(root, out_path)
+        result.output = _rel_path(rel_root, out_path)
         result.bytes_out = len(plain)
         result.message = "decrypted"
         summary.decrypted += 1
@@ -228,7 +240,8 @@ def decrypt_whatsapp_backups(raw_root: Path,
                              log: Optional[Callable[..., None]] = None,
                              *,
                              recovery_key: str = "",
-                             passphrase: str = "") -> DecryptSummary:
+                             passphrase: str = "",
+                             output_root: Optional[Path] = None) -> DecryptSummary:
     """Locate key + crypt pairs and write decrypted SQLite databases."""
     root = Path(raw_root)
     summary = DecryptSummary()
@@ -286,7 +299,8 @@ def decrypt_whatsapp_backups(raw_root: Path,
         if not plain:
             summary.results.append(result)
             continue
-        _write_decrypted(root, crypt_path, plain, result, summary, log)
+        _write_decrypted(root, crypt_path, plain, result, summary, log,
+                         output_root=output_root)
         summary.results.append(result)
     return summary
 

@@ -580,7 +580,7 @@ def _find_by_serial(serial: str,
 
 
 def _detect_mtp_devices(existing: List[DetectedDevice]) -> List[DetectedDevice]:
-    """Handsets visible in the Windows shell namespace (file-transfer mode)."""
+    """Handsets visible via Windows Shell MTP or Linux/macOS GVFS mounts."""
     found: List[DetectedDevice] = []
     try:
         from ..acquire import mtp

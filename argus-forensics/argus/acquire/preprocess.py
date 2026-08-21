@@ -28,7 +28,8 @@ def preprocess_raw_tree(raw_root: Path,
                         log: Optional[Callable[..., None]] = None,
                         *,
                         whatsapp_recovery_key: str = "",
-                        whatsapp_passphrase: str = "") -> Dict[str, Any]:
+                        whatsapp_passphrase: str = "",
+                        output_root: Optional[Path] = None) -> Dict[str, Any]:
     """Run antiforensics scan and WhatsApp crypt decryption before decode."""
     root = Path(raw_root)
     summary: Dict[str, Any] = {
@@ -70,7 +71,8 @@ def preprocess_raw_tree(raw_root: Path,
     wa = decrypt_whatsapp_backups(
         root, log=log,
         recovery_key=whatsapp_recovery_key,
-        passphrase=whatsapp_passphrase)
+        passphrase=whatsapp_passphrase,
+        output_root=output_root)
     summary["whatsapp_decrypt"] = wa_as_dict(wa)
     if wa.decrypted and log:
         log("preprocess", "ok",

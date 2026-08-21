@@ -925,6 +925,9 @@ class _Handler(BaseHTTPRequestHandler):
         if endpoint == "intelligence/run":
             return self._json(self._start_intelligence(body))
 
+        if endpoint == "decrypt/whatsapp":
+            return self._json(self._start_whatsapp_decrypt(body))
+
         # ---- tagging -------------------------------------------------------
         if endpoint == "tag":
             session = wb.session_for(body.get("containers", []),
@@ -1227,12 +1230,16 @@ class _Handler(BaseHTTPRequestHandler):
                 checks.append({
                     "id": "mtp_platform", "label": "MTP platform",
                     "ok": mtp_ok,
-                    "detail": "Windows Shell MTP" if mtp_ok
-                    else "MTP requires Windows — use Import or enable ADB",
+                    "detail": (
+                        "Windows Shell MTP" if mtp_mod.backend() == "windows-shell"
+                        else "Linux/macOS MTP mount (GVFS/libmtp)"
+                        if mtp_ok else
+                        "No MTP backend — install gvfs-mtp or use Import/ADB"),
                 })
                 if not mtp_ok:
                     errors.append(
-                        "MTP acquisition requires Windows with Shell namespace.")
+                        "No MTP backend. On Windows use File transfer; on Linux "
+                        "install gvfs-mtp; on macOS open Android File Transfer.")
                 if serial and adb_ok:
                     from ..acquire.android_adb import AdbSession, probe_capabilities
                     probe = probe_capabilities(AdbSession(serial))
@@ -1501,7 +1508,9 @@ class _Handler(BaseHTTPRequestHandler):
             result = session.intelligence(
                 owner_ids,
                 hashset_registry=wb.hashset_registry,
-                progress=lambda msg: job.emit("intel", "progress", msg))
+                progress=lambda msg: job.emit("intel", "progress", msg),
+                force_media=bool(body.get("force_media")),
+                force_fusion=bool(body.get("force_fusion")))
             count = int((result.get("findings") or {}).get("count", 0))
             job.emit("intel", "ok",
                      f"Intelligence complete — {count:,} finding(s)")
@@ -1511,6 +1520,85 @@ class _Handler(BaseHTTPRequestHandler):
             "intelligence", work,
             label=f"intelligence · {len(containers)} container(s)")
         return {"ok": True, "job_id": job.id}
+
+    def _start_whatsapp_decrypt(self, body: Dict[str, Any]) -> Dict[str, Any]:
+        """Decrypt crypt12/14/15 into a new exhibit container — sealed original stays intact."""
+        from ..core.container import ExtractionMeta
+        from ..acquire.preprocess import preprocess_raw_tree
+        from ..acquire.filesystem import ingest_tree
+        from ..parsers.registry import ParseContext
+
+        wb = self.wb
+        source = Path(body.get("container") or "")
+        if not source.exists():
+            raise ArgusError("container path is required")
+        recovery = (body.get("whatsapp_recovery_key") or "").strip()
+        passphrase = (body.get("whatsapp_passphrase") or "").strip()
+        case_path = body.get("case_path") or ""
+
+        def work(job: Job) -> Dict[str, Any]:
+            def log(module: str, status: str, message: str, **kw: Any) -> None:
+                job.emit(module, status, message, kw.get("level", "info"))
+
+            src = EvidenceContainer(source, mode="r")
+            raw = src.path / "raw"
+            if not raw.is_dir():
+                src.close()
+                raise ArgusError("container has no raw/ tree to decrypt")
+            job.emit("decrypt", "start", "Decrypting WhatsApp backups…")
+            new_container = None
+            dest_raw = source.parent / (source.name + ".whatsapp-decrypt")
+            dest_raw.mkdir(parents=True, exist_ok=True)
+            exhibit = (src.extraction or {}).get("exhibit_id") or ""
+            if case_path and exhibit:
+                case = Case.open(case_path, password=body.get("password") or None)
+                meta = ExtractionMeta(
+                    method="import",
+                    operator=body.get("operator") or "analyst",
+                    exhibit_id=exhibit,
+                    notes=("WhatsApp crypt decrypt supplement. The original "
+                           "sealed container was not modified."),
+                    source_format="whatsapp-crypt",
+                    import_adapter="argus.parsers.android.whatsapp_crypt",
+                )
+                new_container = case.new_container(
+                    exhibit, meta, label="whatsapp-decrypt")
+                dest_raw = new_container.path / "raw"
+                dest_raw.mkdir(parents=True, exist_ok=True)
+            summary = preprocess_raw_tree(
+                raw, log=log,
+                whatsapp_recovery_key=recovery,
+                whatsapp_passphrase=passphrase,
+                output_root=dest_raw)
+            wa = summary.get("whatsapp_decrypt") or {}
+            ingested = 0
+            if new_container and wa.get("decrypted"):
+                job.emit("decrypt", "progress", "Ingesting decrypted databases…")
+                ctx = ParseContext(evidence_root=dest_raw, platform="android",
+                                   log=log)
+                result = ingest_tree(dest_raw, ctx, new_container)
+                ingested = len(result.artifacts)
+                new_container.update_extraction(
+                    method="import",
+                    decode_files_parsed=result.files_parsed)
+                seal = new_container.seal(fast=True)
+                summary["supplement_container"] = str(new_container.path)
+                summary["artifacts"] = ingested
+                summary["seal"] = (seal or {}).get("container_seal", "")[:32]
+                new_container.close()
+            else:
+                summary["sidecar"] = str(dest_raw)
+            src.close()
+            wb.drop_session([str(source)])
+            job.emit("decrypt", "ok",
+                     f"Decrypted {wa.get('decrypted', 0)}/{wa.get('attempted', 0)} "
+                     f"backup(s)"
+                     + (f" — {ingested:,} artifacts in a new container"
+                        if ingested else ""))
+            return summary
+
+        job = wb.jobs.submit("decrypt", work, label="WhatsApp decrypt")
+        return {"ok": True, "job_id": job.id, "label": "WhatsApp decrypt"}
 
     def _start_report(self, body: Dict[str, Any]) -> Dict[str, Any]:
         from ..report.builder import ReportBuilder, ReportOptions

@@ -354,6 +354,22 @@ class FolderGapDetection(unittest.TestCase):
         names = [g[0] for g in gaps]
         self.assertTrue(any("Android" in n for n in names))
 
+    def test_unix_phone_storage_marker(self) -> None:
+        root = Path(tempfile.mkdtemp(prefix="argus-mtp-unix-"))
+        try:
+            (root / "DCIM").mkdir()
+            (root / "Download").mkdir()
+            self.assertTrue(mtp._unix_looks_like_phone_storage(root))
+            empty = root / "empty"
+            empty.mkdir()
+            self.assertFalse(mtp._unix_looks_like_phone_storage(empty))
+        finally:
+            shutil.rmtree(root, ignore_errors=True)
+
+    def test_backend_windows_or_empty(self) -> None:
+        kind = mtp.backend()
+        self.assertIn(kind, ("windows-shell", "gvfs", "libmtp", ""))
+
     def test_manifest_includes_completeness(self) -> None:
         result = mtp.AcquisitionResult(
             files_copied=80, files_listed=100,
@@ -362,6 +378,26 @@ class FolderGapDetection(unittest.TestCase):
         data = json.loads(path.read_text(encoding="utf-8"))
         self.assertEqual(data["completeness_pct"], 80.0)
         self.assertTrue(data.get("top_missing_folders"))
+
+    def test_unix_copy_from_mount(self) -> None:
+        src = self.dir / "phone"
+        (src / "DCIM").mkdir(parents=True)
+        (src / "DCIM" / "a.jpg").write_bytes(b"hello")
+        dest = self.dir / "out"
+        dest.mkdir()
+        fake = mtp.MTPDevice(name="TestPhone", path=str(src))
+        real = mtp._unix_match_device
+        mtp._unix_match_device = lambda name: fake
+        try:
+            result = mtp.AcquisitionResult(
+                device="TestPhone", destination=str(dest))
+            out = mtp._acquire_unix(
+                "TestPhone", dest, result, None,
+                hash_files=False, resume=False, turbo=True)
+            self.assertGreaterEqual(out.files_copied, 1)
+            self.assertTrue((dest / "DCIM" / "a.jpg").is_file())
+        finally:
+            mtp._unix_match_device = real
 
 
 class DegradesQuietly(unittest.TestCase):
