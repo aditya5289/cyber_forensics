@@ -1013,7 +1013,14 @@ class _Handler(BaseHTTPRequestHandler):
             # depth, matching AcquisitionPlan's own default and what the UI
             # actually sends — it only sets turbo=true when the operator
             # explicitly picks the Turbo method.
-            turbo=bool(body.get("turbo", False)))
+            turbo=bool(body.get("turbo", False)),
+            physical_full=bool(body.get("physical_full", False)))
+        from ..acquire.ios_live import looks_like_apple
+        if (looks_like_apple(plan.device_name) or transport == "usbmux") \
+                and method == "physical":
+            raise ArgusError(
+                "iOS physical imaging is not implemented. Use Backup on "
+                "an unlocked, trusted iPhone.")
         if not for_preview:
             plan.validate()
             # Capability is a property of device_name + lock_state + method,
@@ -1023,7 +1030,7 @@ class _Handler(BaseHTTPRequestHandler):
             self._assert_acquire_supported(plan, method)
 
         device = None
-        if method != "import":
+        if method not in ("import", "sim", "cloud"):
             device = resolve_device(
                 plan.serial,
                 transport=body.get("transport", ""),
@@ -1031,22 +1038,23 @@ class _Handler(BaseHTTPRequestHandler):
                 device_name=plan.device_name,
             )
         elif not plan.source_path or not plan.source_path.exists():
-            raise ArgusError("choose an evidence folder or backup file to import")
+            label = {"sim": "SIM dump", "cloud": "cloud export"}.get(
+                method, "evidence folder or backup file")
+            raise ArgusError(f"choose a {label} to import")
         return case, plan, device, method
 
     def _assert_acquire_supported(self, plan, method: str) -> None:
         wb = self.wb
-        if not (plan.device_name and method != "import"):
+        if not (plan.device_name and method not in ("import", "sim", "cloud")):
             return
         # backup/ios_backup and mtp are not modeled as per-device capability
-        # rows - manual.assert_supported already remaps every iOS method name
-        # (filesystem, logical, comprehensive, turbo, mtp) onto "backup"
-        # internally, so an Apple device must NOT be exempted from the check
-        # below; that used to skip gating entirely for any Apple device name,
-        # which let a BFU iPhone be accepted for "filesystem" acquisition.
-        if method in ("backup", "ios_backup", "mtp"):
+        # rows on Android. Apple methods MUST still be gated — remapping
+        # filesystem→backup before this check used to let a BFU iPhone through.
+        from ..acquire.ios_live import looks_like_apple
+        apple = looks_like_apple(plan.device_name)
+        if method in ("mtp",) or (method in ("backup", "ios_backup") and not apple):
             return
-        if method in ("comprehensive", "turbo"):
+        if method in ("comprehensive", "turbo", "physical"):
             try:
                 wb.manual.get(plan.device_name)
             except Exception:
@@ -1058,8 +1066,16 @@ class _Handler(BaseHTTPRequestHandler):
                     return
                 except Exception:
                     continue
+            if method == "physical":
+                try:
+                    wb.manual.assert_supported(
+                        plan.device_name, plan.lock_state, "physical")
+                except Exception:
+                    pass
+                return
             from ..core.errors import ArgusError
-            label = "Comprehensive" if method == "comprehensive" else "Turbo"
+            label = "Comprehensive" if method == "comprehensive" else (
+                "Physical" if method == "physical" else "Turbo")
             raise ArgusError(
                 f"{label} extraction requires logical or filesystem "
                 "support for this device and lock state.")
@@ -1175,7 +1191,7 @@ class _Handler(BaseHTTPRequestHandler):
         serial = body.get("serial", "")
         transport = body.get("transport", "")
 
-        if method != "import":
+        if method not in ("import", "sim", "cloud"):
             from ..devices.diagnose import diagnose
             diag = diagnose()
             adb_ok = bool(diag.adb_available)
@@ -1187,7 +1203,8 @@ class _Handler(BaseHTTPRequestHandler):
             if not adb_ok:
                 errors.append("adb not found — install platform-tools or use Import.")
 
-            if method in ("logical", "filesystem", "comprehensive", "turbo", "backup"):
+            if method in ("logical", "filesystem", "comprehensive", "turbo",
+                          "backup", "physical"):
                 authorized = [d for d in diag.devices if d.state == "device"]
                 target = next((d for d in authorized
                                if not serial or d.serial == serial), None)
@@ -1219,10 +1236,30 @@ class _Handler(BaseHTTPRequestHandler):
                         warnings.append(
                             "No ADB device detected — enable USB debugging or use MTP.")
 
-            if method == "comprehensive" and transport == "mtp":
+            if method in ("comprehensive", "physical", "filesystem", "logical") \
+                    and transport == "mtp" and not adb_ok:
                 warnings.append(
-                    "Handset is in MTP mode — Comprehensive needs USB debugging. "
-                    "Switch to File transfer + enable Developer options, or use MTP method.")
+                    f"{method.title()} needs USB debugging. Enable Developer "
+                    "options, or use MTP if the phone only mounts as a drive.")
+
+            if method == "physical" and serial and adb_ok:
+                from ..acquire.android_adb import AdbSession
+                from ..acquire.android_physical import probe_root
+                rooted = False
+                try:
+                    rooted = probe_root(AdbSession(serial))
+                except Exception:
+                    rooted = False
+                checks.append({
+                    "id": "root", "label": "Root shell",
+                    "ok": rooted,
+                    "detail": "uid=0 via adb/su" if rooted
+                    else "Physical imaging needs Magisk or an engineering build",
+                })
+                if not rooted:
+                    errors.append(
+                        "Physical extraction needs a root ADB shell. Use "
+                        "Comprehensive until the handset is rooted.")
 
             if method == "mtp":
                 from ..acquire import mtp as mtp_mod

@@ -43,6 +43,9 @@ COMMS_PROVIDERS: List[Tuple[str, str, str]] = [
     ("vivo_sms", "content://com.vivo.mms/sms", "Messages"),
     ("bbk_sms", "content://com.android.bbksms/sms", "Messages"),
     ("sec_calls", "content://logs/calls", "Calls"),
+    ("coloros_sms", "content://com.coloros.mms/sms", "Messages"),
+    ("oppo_sms", "content://com.oppo.mms/sms", "Messages"),
+    ("transsion_sms", "content://com.transsion.smartmessage/sms", "Messages"),
 ]
 
 _COMMS_DUMPSYS = (
@@ -53,6 +56,8 @@ _COMMS_DUMPSYS = (
     ("contacts", "dumpsys contact", "Contacts"),
     ("notification", "dumpsys notification --noredact", "Messages"),
     ("isub", "dumpsys isub", "Calls"),
+    ("sms", "dumpsys sms", "Messages"),
+    ("iccphonebook", "dumpsys iccphonebook", "Contacts"),
 )
 
 # Telephony / contacts databases — pulled when root or readable on shared storage.
@@ -69,6 +74,9 @@ COMM_DATABASE_TARGETS: List[Tuple[str, str]] = [
     ("/data/data/com.samsung.android.messaging/databases/messages.db", "Messages"),
     ("/data/data/com.samsung.android.dialer/databases/phone.db", "Calls"),
     ("/data/data/com.miui.smsextra/databases/sms.db", "Messages"),
+    ("/data/data/com.coloros.mms/databases", "Messages"),
+    ("/data/data/com.transsion.smartmessage/databases", "Messages"),
+    ("/data/data/com.tencent.mm/MicroMsg", "Messages"),
 ]
 
 _SDCARD_DB_HINTS = re.compile(

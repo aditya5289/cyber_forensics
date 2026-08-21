@@ -65,6 +65,27 @@ _VENDOR_FS: Dict[str, List[PathEntry]] = {
         ("/sdcard/Honor", "Other"),
         ("/sdcard/Backup", "Other"),
     ],
+    "motorola": [
+        ("/sdcard/Motorola", "Other"),
+        ("/sdcard/MotoBackup", "Other"),
+        ("/data/data/com.motorola.ccc.ota/databases", "Other"),
+    ],
+    "google": [
+        ("/data/data/com.google.android.apps.messaging/databases", "Messages"),
+        ("/sdcard/Google Messages", "Messages"),
+    ],
+    "transsion": [
+        ("/sdcard/HiOS", "Other"),
+        ("/sdcard/XOS", "Other"),
+        ("/sdcard/Transsion", "Other"),
+        ("/sdcard/Backup", "Other"),
+        ("/sdcard/PhoneClone", "Other"),
+        ("/sdcard/Android/data/com.transsion.phonemaster", "Other"),
+        ("/sdcard/Android/data/com.transsion.letswitch", "Other"),
+        ("/data/data/com.transsion.smartmessage/databases", "Messages"),
+        ("/data/data/com.transsion.deskclock/databases", "Other"),
+        ("/data/data/com.transsion.notebook/databases", "Other"),
+    ],
 }
 
 _VENDOR_COMM: Dict[str, List[PathEntry]] = {
@@ -93,6 +114,22 @@ _VENDOR_COMM: Dict[str, List[PathEntry]] = {
     ],
     "realme": [
         ("/sdcard/Realme/Backup", "Other"),
+        ("/sdcard/ColorOS/Backup", "Other"),
+    ],
+    "oneplus": [
+        ("/sdcard/OnePlus/Backup", "Other"),
+        ("/sdcard/OxygenOS/Backup", "Other"),
+    ],
+    "motorola": [
+        ("/sdcard/MotoBackup", "Other"),
+        ("/sdcard/Motorola/Backup", "Other"),
+    ],
+    "transsion": [
+        ("/sdcard/HiOS/Backup", "Other"),
+        ("/sdcard/XOS/Backup", "Other"),
+        ("/sdcard/PhoneClone", "Other"),
+        ("/sdcard/Transsion/Backup", "Other"),
+        ("/sdcard/LetsSwitch", "Other"),
     ],
 }
 
@@ -114,16 +151,58 @@ _PROVIDER_EXTRAS: Dict[str, List[Tuple[str, str, str]]] = {
     ],
     "oppo": [
         ("mms_part", "content://mms/part", "Messages"),
+        ("coloros_sms", "content://com.coloros.mms/sms", "Messages"),
+        ("oppo_sms", "content://com.oppo.mms/sms", "Messages"),
+        ("coloros_calls", "content://com.coloros.phonemanager/calllog", "Calls"),
     ],
+    "realme": [
+        ("mms_part", "content://mms/part", "Messages"),
+        ("coloros_sms", "content://com.coloros.mms/sms", "Messages"),
+    ],
+    "oneplus": [
+        ("mms_part", "content://mms/part", "Messages"),
+        ("coloros_sms", "content://com.coloros.mms/sms", "Messages"),
+    ],
+    "motorola": [
+        ("mms_part", "content://mms/part", "Messages"),
+    ],
+    "transsion": [
+        ("mms_part", "content://mms/part", "Messages"),
+        ("transsion_sms", "content://com.transsion.smartmessage/sms", "Messages"),
+        ("hios_sms", "content://sms", "Messages"),
+    ],
+}
+
+_MAKE_ALIASES: Dict[str, str] = {
+    "iqoo": "vivo",
+    "bbk": "vivo",
+    "funtouch": "vivo",
+    "poco": "xiaomi",
+    "redmi": "xiaomi",
+    "miui": "xiaomi",
+    "coloros": "oppo",
+    "oxygenos": "oneplus",
+    "moto": "motorola",
+    "pixel": "google",
+    "tecno": "transsion",
+    "infinix": "transsion",
+    "itel": "transsion",
+    "hios": "transsion",
+    "xos": "transsion",
 }
 
 
 def _normalize_make(make: str) -> str:
     m = (make or "").strip().lower()
+    if not m:
+        return ""
+    for alias, canonical in _MAKE_ALIASES.items():
+        if alias in m:
+            return canonical
     for key in _VENDOR_FS:
         if key in m:
             return key
-    return m.split()[0] if m else ""
+    return m.split()[0]
 
 
 def expand_fs_paths(make: str, model: str = "") -> List[PathEntry]:

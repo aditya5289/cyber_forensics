@@ -30,7 +30,7 @@ button,input,select,textarea{font:inherit;color:inherit}
 header{background:var(--bg2);border-bottom:1px solid var(--line);
   padding:0 16px;display:flex;align-items:center;gap:18px;height:52px}
 .brand{display:flex;align-items:baseline;gap:8px;font-weight:700;
-  letter-spacing:.1em;font-size:14px;color:var(--accent)}
+  letter-spacing:.14em;font-size:14px;color:#d4b45a}
 #buildTag{font:11px var(--mono);opacity:.75}
 .card.blocked{opacity:.72;cursor:default;border-style:dashed}
 .pill.bad{background:#5a2f2c;color:#f0918a;border-color:#5a2f2c}
@@ -122,6 +122,22 @@ input[type=checkbox],input[type=radio]{width:15px;height:15px;accent-color:var(-
 .card.pick{cursor:pointer}
 .card.pick:hover{border-color:var(--accent)}
 .card.sel{border-color:var(--accent);background:#16202b}
+.folio{border:1px solid rgba(201,162,39,.32);
+  background:linear-gradient(165deg,#14120e 0%,#151a22 60%);
+  padding:18px 20px;border-radius:6px;position:relative;margin:12px 0}
+.folio::before{content:"";position:absolute;left:0;top:0;bottom:0;width:3px;
+  background:linear-gradient(#d4b45a,#8a7018)}
+.folio .mark{font:11px var(--mono);letter-spacing:.2em;text-transform:uppercase;
+  color:#d4b45a}
+.folio .verdict{font-family:Georgia,"Iowan Old Style","Palatino Linotype",serif;
+  font-size:18px;font-weight:500;line-height:1.4;margin:8px 0 10px;max-width:46rem}
+.folio p{color:var(--fg2);font-size:13px;line-height:1.65;margin:0 0 8px;max-width:50rem}
+.folio .cols{display:grid;grid-template-columns:1fr 1fr;gap:14px}
+.folio h5{margin:0 0 6px;font-size:10px;letter-spacing:.1em;text-transform:uppercase;
+  color:#d4b45a}
+.folio ul{margin:0;padding-left:18px;color:var(--fg2);font-size:12.5px}
+.folio .next{margin-top:12px;padding-top:10px;border-top:1px solid var(--line);
+  font-size:13px;color:var(--fg)}
 .cards{display:grid;gap:12px;grid-template-columns:repeat(auto-fill,minmax(272px,1fr))}
 .kv{display:grid;grid-template-columns:auto 1fr;gap:4px 14px;font-size:12px}
 .kv dt{color:var(--fg2);white-space:nowrap}
@@ -1911,13 +1927,13 @@ async function showMatrix(name) {
 
 function methodsForLock(lockState) {
   if (S.device?.transport === "usbmux" || /iphone|ipad|ios/i.test(S.device?.os_family || S.device?.name || "")) {
-    return ["backup", "comprehensive", "turbo", "import"];
+    return ["backup", "import", "sim", "cloud"];
   }
   if (S.device?.transport === "mtp") {
     const adbAlso = (S.devices || []).some(d => d.transport === "adb");
     return adbAlso
-      ? ["mtp", "comprehensive", "logical", "filesystem", "import"]
-      : ["mtp"];
+      ? ["mtp", "comprehensive", "physical", "logical", "filesystem", "import", "sim", "cloud"]
+      : ["mtp", "import", "sim", "cloud"];
   }
   const profile = S.deviceProfile;
   const base = ["import"];
@@ -1926,24 +1942,25 @@ function methodsForLock(lockState) {
     .find(r => r.lock_state === lockState);
   const live = (row?.methods || []).map(m => m.method).filter(m => m !== "import");
   if (live.some(m => m === "logical" || m === "filesystem")) {
-    live.push("comprehensive", "turbo");
+    live.push("comprehensive", "turbo", "physical");
   }
-  if (live.includes("logical") && navigator.platform.toLowerCase().includes("win")) {
+  if (live.includes("logical")) {
     live.push("mtp");
   }
+  live.push("sim", "cloud");
   return [...new Set([...base, ...live])];
 
   function devMethodsFallback() {
     if (S.device?.transport === "mtp") {
       const adbAlso = (S.devices || []).some(d => d.transport === "adb");
       return adbAlso
-        ? ["import", "comprehensive", "logical", "filesystem", "mtp", "turbo", "backup"]
-        : ["mtp"];
+        ? ["import", "comprehensive", "physical", "logical", "filesystem", "mtp", "turbo", "backup", "sim", "cloud"]
+        : ["mtp", "import", "sim"];
     }
     const methods = S.device
-      ? ["import", "comprehensive", "logical", "filesystem", "turbo", "backup"]
-      : ["import"];
-    if (S.device && navigator.platform.toLowerCase().includes("win")) {
+      ? ["import", "comprehensive", "physical", "logical", "filesystem", "turbo", "backup", "sim", "cloud"]
+      : ["import", "sim", "cloud"];
+    if (S.device) {
       methods.push("mtp");
     }
     return methods;
@@ -1952,14 +1969,15 @@ function methodsForLock(lockState) {
 
 function methodMeta(methodId, lockState) {
   const profile = S.deviceProfile;
-  if (!profile || methodId === "import") return { enabled: true, note: "" };
+  if (!profile || ["import", "sim", "cloud"].includes(methodId))
+    return { enabled: true, note: "" };
   if (methodId === "comprehensive") {
     const logical = methodMetaInner("logical", lockState);
     const fs = methodMetaInner("filesystem", lockState);
     return {
       enabled: logical.enabled || fs.enabled,
       note: logical.enabled || fs.enabled
-        ? "Recommended — 4-pass god-level: logical, app DBs, filesystem, dumpsys/Vivo exports."
+        ? "Recommended — god-level multi-pass: logical, app DBs, filesystem, shared messenger/crypt, dumpsys, live state, APKs. Root app trees when a shell is uid=0. MTP overlays when the phone also mounts."
         : "Requires logical or filesystem support for this device.",
       risk: "medium",
       label: "Comprehensive (god-level)",
@@ -1986,19 +2004,39 @@ function methodMeta(methodId, lockState) {
       label: "Turbo (fastest)",
     };
   }
+  if (methodId === "physical") {
+    const ios = S.device?.transport === "usbmux"
+      || /iphone|ipad|ios/i.test(S.device?.os_family || S.device?.name || "");
+    if (ios) {
+      return {
+        enabled: false,
+        note: "iOS physical (BootROM / AFU) is not implemented. Use Backup.",
+        risk: "high",
+        label: "Physical extraction",
+      };
+    }
+    const adbLive = S.device?.transport === "adb"
+      || (S.devices || []).some(d => d.transport === "adb");
+    const catalog = methodMetaInner("physical", lockState);
+    return {
+      enabled: catalog.enabled || adbLive,
+      note: adbLive
+        ? "Bit-for-bit userdata/metadata/persist via a root ADB shell, then a full comprehensive overlay. Needs Magisk or an engineering build."
+        : "Connect the handset with USB debugging and a root shell (Magisk / engineering build).",
+      risk: "high",
+      label: "Physical extraction",
+    };
+  }
   if (methodId === "mtp") {
-    const isWin = navigator.platform.toLowerCase().includes("win");
     const mtpConnected = S.device?.transport === "mtp";
     const logical = methodMetaInner("logical", lockState);
     return {
-      enabled: isWin && (mtpConnected || logical.enabled || !profile),
+      enabled: mtpConnected || logical.enabled || !profile,
       note: mtpConnected
         ? "Handset detected in file-transfer mode — shared storage copy with hashing."
         : logical.enabled
           ? "For handsets in file-transfer mode without USB debugging. Shared storage only."
-          : isWin
-            ? "Connect a handset in file-transfer (MTP) mode, or pick a catalogued profile."
-            : "MTP requires Windows.",
+          : "Connect a handset in file-transfer (MTP) mode, or pick a catalogued profile.",
       risk: "low",
       label: "MTP (file transfer)",
     };
@@ -2154,6 +2192,11 @@ async function viewExtract(m) {
         rollback journals. This is usually the most probative material in the
         case; turn it off only if you need the fastest possible run.</small>
       </span></label>
+    <label class="check" id="ePhysFullWrap" style="display:none"><input type="checkbox" id="ePhysFull">
+      <span>Full-disk physical
+        <small>Also image system/vendor/boot. Default physical dumps userdata,
+        metadata, persist and radio NV only — the partitions that hold case facts.</small>
+      </span></label>
     <div class="field" style="max-width:280px;margin-top:10px">
       <label>Carve confidence floor</label>
       <input type="number" id="eConf" value="0.45" min="0.1" max="0.95" step="0.05">
@@ -2183,11 +2226,20 @@ async function viewExtract(m) {
 
   const effectiveMethod = () => {
     if (S.device?.transport === "usbmux" || /ios/i.test(S.device?.os_family || "")) {
-      const live = method === "import" ? "backup" : method;
-      return live === "ios_backup" ? "backup" : live;
+      if (["import", "sim", "cloud"].includes(method)) return method;
+      const live = method === "physical" ? "backup" : method;
+      return (live === "ios_backup" || live === "comprehensive"
+        || live === "turbo" || live === "filesystem" || live === "logical")
+        ? "backup" : live;
     }
-    return (S.device?.transport === "mtp" ? "mtp" : method);
+    const adbMethods = ["comprehensive", "logical", "filesystem", "physical", "turbo", "backup"];
+    const adbLive = S.device?.transport === "adb"
+      || (S.devices || []).some(d => d.transport === "adb");
+    if (adbMethods.includes(method) && adbLive) return method;
+    return (S.device?.transport === "mtp" && method !== "import" ? "mtp" : method);
   };
+  const adbMethodsLive = (m) =>
+    ["comprehensive", "logical", "filesystem", "physical", "turbo", "backup"].includes(m);
 
   const METHOD_DEFS = {
     import: ["Import existing extraction",
@@ -2195,7 +2247,9 @@ async function viewExtract(m) {
     turbo: ["Turbo (fast intake)",
       "Filesystem-only, parallel pulls. Skips app discovery, dumpsys, comm exports, carving, and hash verify — for bulk lab intake days."],
     comprehensive: ["Comprehensive (god-level)",
-      "4 passes: logical SMS/MMS query → app DB discovery → filesystem + WAL → dumpsys & Vivo/.vivobackup exports. Best for non-root Android (Vivo Y02, Samsung, etc.)."],
+      "God-level live extraction: logical SMS/MMS → app DBs → filesystem + WAL → shared messenger trees & WhatsApp crypt hunt → dumpsys/vendor → live settings/logcat → user APKs. Root pulls files/shared_prefs when uid=0. MTP overlay when the phone also mounts."],
+    physical: ["Physical (bit-for-bit)",
+      "Root ADB: image userdata/metadata/persist (and more), carve unallocated, then run Comprehensive on top. Highest yield. Needs Magisk or an engineering build — ARGUS does not exploit bootloaders."],
     logical: ["Logical (Full read)",
       "Content-provider query only. Fast; pair with filesystem or use Comprehensive for full comms fallbacks."],
     filesystem: ["File system",
@@ -2203,7 +2257,11 @@ async function viewExtract(m) {
     mtp: ["MTP (file transfer)",
       "Shared storage only. Vivo Y02: unlock Developer options (tap Software version 7×), or export SMS/vCard on-phone then re-extract."],
     backup: ["Backup (iOS / Android)",
-      "iPhone: iTunes-style logical backup (messages, calls, app data). Android: adb backup (often empty on Android 12+)."],
+      "iPhone: iTunes-style logical backup (messages, calls, app data). Android: adb backup (falls through to Comprehensive on Android 12+)."],
+    sim: ["SIM dump (import)",
+      "Import a SIM/USIM reader dump (.bin / .sim). Deleted SMS stay on the card until overwritten — often the only evidence after a destroyed handset. ARGUS does not drive a reader; connect yours, dump, then import."],
+    cloud: ["Cloud export (import)",
+      "Import a Google Takeout, iCloud, or OEM cloud archive the examiner already obtained. ARGUS does not log into cloud accounts."],
     ios_backup: ["iOS backup",
       "Full logical backup via libimobiledevice, then decode."],
   };
@@ -2214,17 +2272,20 @@ async function viewExtract(m) {
       ? ($("#eSpanCustom")?.value.trim() || "") : (spanEl?.value || "all");
     const cats = [...m.querySelectorAll(".cat:checked")].map(c => c.value);
     const liveMethod = effectiveMethod();
+    const adbDev = (S.devices || []).find(d => d.transport === "adb");
     return {
       case_path: S.casePath, password: S.casePassword,
       exhibit_id: $("#eExhibit").value, operator: $("#eOp").value.trim(),
       method: liveMethod, time_span: span, categories: cats,
       device_name: $("#eDevice").value.trim(),
       lock_state: $("#eLock").value,
-      serial: S.device?.serial || "",
-      transport: S.device?.transport || "",
+      serial: adbDev?.serial || S.device?.serial || "",
+      transport: (adbMethodsLive(liveMethod) && adbDev)
+        ? "adb" : (S.device?.transport || ""),
       battery: S.device?.battery ?? null,
       mtp_name: S.device?.name || S.device?.model || "",
-      source_path: liveMethod === "import" ? ($("#eSrc")?.value.trim() || "") : "",
+      source_path: ["import", "sim", "cloud"].includes(liveMethod)
+        ? ($("#eSrc")?.value.trim() || "") : "",
       backup_password: $("#ePw").value,
       whatsapp_recovery_key: $("#eWaKey")?.value?.trim() || "",
       whatsapp_passphrase: $("#eWaPass")?.value || "",
@@ -2232,6 +2293,7 @@ async function viewExtract(m) {
       recover_deleted: $("#eCarve").checked,
       carve_confidence: parseFloat($("#eConf").value) || 0.45,
       turbo: liveMethod === "turbo",
+      physical_full: !!$("#ePhysFull")?.checked,
       resume: !!S.resumeContainer,
       resume_container: S.resumeContainer || "",
       auto_pipeline: !!$("#eAutoPipe")?.checked,
@@ -2277,7 +2339,7 @@ async function viewExtract(m) {
     clearTimeout(preflightTimer);
     preflightTimer = setTimeout(async () => {
       const host = $("#preflightBlock");
-      if (!host || !S.casePath || method === "import") {
+      if (!host || !S.casePath || ["import", "sim", "cloud"].includes(method)) {
         paintPreflight(null);
         return;
       }
@@ -2287,8 +2349,10 @@ async function viewExtract(m) {
         const btn = $("#eRun");
         if (btn && (r.errors || []).length) btn.disabled = true;
         else if (btn && S.casePath) btn.disabled = false;
-      } catch (_) {
-        host.style.display = "none";
+      } catch (err) {
+        host.style.display = "";
+        host.innerHTML = `<div class="note warn"><b>Preflight could not run</b>
+          ${esc(err.message || "network error")}</div>`;
       }
     }, 400);
   };
@@ -2328,7 +2392,7 @@ async function viewExtract(m) {
     const host = $("#methodCards");
     host.innerHTML = Object.entries(METHOD_DEFS).map(([id, [title, body]]) => {
       const meta = methodMeta(id, lock);
-      const enabled = meta.enabled && (id === "import" || !!dev);
+      const enabled = meta.enabled && (["import", "sim", "cloud"].includes(id) || !!dev);
       return methodCard(id, title, body + (meta.note && !enabled
         ? ` ${meta.note}` : ""), enabled);
     }).join("");
@@ -2375,14 +2439,18 @@ async function viewExtract(m) {
   const paintMethods = () => {
     m.querySelectorAll("#methodCards .card").forEach(c =>
       c.classList.toggle("sel", c.dataset.m === method));
-    $("#sourceBlock").innerHTML = method === "import" ? `
+    $("#sourceBlock").innerHTML = ["import", "sim", "cloud"].includes(method) ? `
       <h2>Evidence source</h2>
       <div class="inline" style="max-width:680px">
-        <input id="eSrc" placeholder="Folder, .xry/.xrycase, .ab, iOS backup, UFDR…"
+        <input id="eSrc" placeholder="${method === "sim"
+          ? "SIM/USIM dump (.bin, .sim, EF_* folder)"
+          : method === "cloud"
+            ? "Google Takeout / iCloud / OEM cloud export folder or zip"
+            : "Folder, .xry/.xrycase, .ab, iOS backup, UFDR…"}"
           spellcheck="false" value="${esc(S.source?.path || "")}">
         <button class="btn" id="eBrowse">Browse…</button></div>
       <div id="srcInfo"></div>` : "";
-    if (method === "import") {
+    if (["import", "sim", "cloud"].includes(method)) {
       $("#eBrowse").onclick = () => openBrowser({
         title: "Choose the evidence folder or backup",
         start: $("#eSrc").value || S.env.workspace, allowFiles: true,
@@ -2397,6 +2465,8 @@ async function viewExtract(m) {
     const turbo = method === "turbo";
     carve.checked = !turbo;
     carve.disabled = turbo;
+    const physWrap = $("#ePhysFullWrap");
+    if (physWrap) physWrap.style.display = method === "physical" ? "" : "none";
     const tip = $("#mtpTip");
     if (tip) {
       if (method === "mtp") {
@@ -2487,7 +2557,8 @@ async function viewExtract(m) {
         }
       } catch (_) {}
     }
-    if (S.device?.transport === "mtp" && !/ios/i.test(S.device?.os_family || "")) {
+    if (S.device?.transport === "mtp" && !/ios/i.test(S.device?.os_family || "")
+        && !["comprehensive", "physical", "logical", "filesystem", "backup", "import", "sim", "cloud"].includes(method)) {
       method = "mtp";
       S.source = null;
       paintMethodCards();
@@ -2508,8 +2579,12 @@ async function viewExtract(m) {
       $("#eMsg").innerHTML = `<span style="color:var(--danger)">Select at least one category.</span>`;
       return;
     }
-    if (payload.method === "import" && !payload.source_path) {
-      $("#eMsg").innerHTML = `<span style="color:var(--danger)">Choose an evidence folder or backup file to import, or connect the handset for MTP extraction.</span>`;
+    if (["import", "sim", "cloud"].includes(payload.method) && !payload.source_path) {
+      $("#eMsg").innerHTML = `<span style="color:var(--danger)">${
+        payload.method === "sim" ? "Choose a SIM/USIM dump to import."
+        : payload.method === "cloud" ? "Choose a cloud export folder or zip to import."
+        : "Choose an evidence folder or backup file to import, or connect the handset for MTP extraction."
+      }</span>`;
       return;
     }
     if (payload.method === "mtp" && !payload.serial && !payload.mtp_name) {
@@ -2542,7 +2617,8 @@ async function viewExtract(m) {
     m.querySelectorAll(".cat").forEach(c => { c.checked = true; });
     const carve = $("#eCarve");
     if (carve) { carve.checked = false; carve.disabled = true; }
-    method = dev?.transport === "mtp" ? "mtp" : "comprehensive";
+    method = (dev?.transport === "mtp" && !(S.devices || []).some(d => d.transport === "adb"))
+      ? "mtp" : "comprehensive";
     paintMethodCards();
     paintMethods();
     syncTurboRecovery();
@@ -3070,6 +3146,52 @@ function watchJob(jobId, mountId, onDone) {
   S.jobTimer = setInterval(poll, 250);
 }
 
+function composeExtractFolio(r) {
+  const method = r.method || "extraction";
+  const n = r.artifacts || 0;
+  const deleted = r.deleted_recovered || 0;
+  const cats = r.categories || {};
+  const msgs = (cats.Messages || 0) + (cats.Chats || 0);
+  const mtpGap = method === "mtp" && !msgs && !(cats.Contacts) && !(cats.Calls);
+  const crypt = (r.audit_warnings || []).some(a =>
+    /encrypt|crypt/i.test(a.message || a.code || ""));
+  let verdict;
+  if (mtpGap) {
+    verdict = `This was an MTP copy of shared storage. ${num(n)} artifact(s) were decoded; live SMS, contacts and calls were not queried.`;
+  } else if (n) {
+    verdict = `${num(n)} artifact(s) were decoded from a ${esc(method)} extraction`
+      + (deleted ? `, including ${num(deleted)} recovered from deleted space` : "")
+      + ".";
+  } else {
+    verdict = "The container is present, but decode has not produced artifacts yet.";
+  }
+  const next = mtpGap
+    ? { label: "Run Comprehensive with USB debugging",
+        reason: "Logical providers and app databases require an authorised ADB session." }
+    : crypt
+      ? { label: "Supply the WhatsApp key or crypt15 passphrase",
+          reason: "Encrypted stores are named, not opened." }
+      : { label: "Open Analyse, then Findings, then the court report",
+          reason: "The report must be generated from the sealed container." };
+  const held = [];
+  if (msgs) held.push(`${num(msgs)} message or chat record(s).`);
+  if (cats.Contacts) held.push(`${num(cats.Contacts)} contact(s).`);
+  if (cats.Calls) held.push(`${num(cats.Calls)} call(s).`);
+  if (deleted) held.push(`${num(deleted)} recovered deleted record(s).`);
+  const gaps = [];
+  if (mtpGap) gaps.push("MTP cannot reach /data/data.");
+  (r.acquisition_summary?.caveats || []).slice(0, 3).forEach(c => gaps.push(c));
+  return `<div class="folio">
+    <div class="mark">Examiner’s folio</div>
+    <div class="verdict">${verdict}</div>
+    <div class="cols">
+      ${held.length ? `<div><h5>Held</h5><ul>${held.map(s => `<li>${s}</li>`).join("")}</ul></div>` : ""}
+      ${gaps.length ? `<div><h5>Not held / not claimed</h5><ul>${gaps.map(s => `<li>${esc(s)}</li>`).join("")}</ul></div>` : ""}
+    </div>
+    <div class="next"><b>Next — ${esc(next.label)}</b> ${esc(next.reason)}</div>
+  </div>`;
+}
+
 function renderJobResult(j) {
   const out = $("#jResult");
   if (!out) return;
@@ -3180,15 +3302,32 @@ function renderJobResult(j) {
   }).filter(Boolean).join(" ");
   const acqSum = r.acquisition_summary || {};
   const providerRows = acqSum.comms_row_total || 0;
+  const phys = acqSum.physical || {};
+  const physBanner = (phys.dumped && phys.dumped.length)
+    ? `<div class="note ${/file|fbe|encrypt/i.test(phys.crypto || "") ? "warn" : "ok"}">
+        <b>Physical</b> — imaged ${esc((phys.dumped || []).join(", "))}
+        ${phys.crypto ? ` · crypto ${esc(phys.crypto)}` : ""}
+        ${phys.carved_files ? ` · carved ${num(phys.carved_files)} file(s) from userdata` : ""}
+        ${/file|fbe|encrypt/i.test(phys.crypto || "")
+          ? "<br>Userdata is file-based encrypted — carved files have no original path and ciphertext is not decoded."
+          : ""}
+      </div>` : "";
+  const caveats = (acqSum.caveats || []).slice(0, 3);
+  const caveatBanner = caveats.length
+    ? caveats.map(c => `<div class="note warn">${esc(c)}</div>`).join("") : "";
   const mtpBanner = (r.method === "mtp" && !providerRows && !commsKpi)
     ? `<div class="note warn"><b>MTP limitation</b> — live SMS/contacts/calls were not acquired.
       Enable USB debugging and re-run <b>Comprehensive</b> for full communications.</div>` : "";
+  const folio = composeExtractFolio(r);
   out.innerHTML = `
+    ${folio}
     <div class="note ${bad ? "warn" : "ok"}"><b>${esc(r.status || "Completed")}</b>
       ${num(r.artifacts)} artifacts decoded, of which
       <b>${num(r.deleted_recovered)}</b> were recovered from deleted or
       unallocated space and were not visible to the device user.</div>
     ${mtpBanner}
+    ${physBanner}
+    ${caveatBanner}
     ${commsKpi ? `<div class="inline" style="margin:8px 0;gap:6px;flex-wrap:wrap">${commsKpi}</div>` : ""}
     ${providerRows ? `<div class="note" style="margin-bottom:8px">Acquisition captured <b>${num(providerRows)}</b> live provider row(s) before decode.</div>` : ""}
     <div id="extractRecs" class="grid one" style="margin:10px 0"></div>
@@ -3864,7 +4003,7 @@ async function viewReport(m) {
         <span>Include investigative findings
           <small>Ranked leads with citations and caveats, placed before the
           artifact tables.</small></span></label>
-      <label class="check"><input type="checkbox" id="rLog">
+      <label class="check"><input type="checkbox" id="rLog" checked>
         <span>Append the extraction log</span></label>
       <label class="check"><input type="checkbox" id="rAudit">
         <span>Append the chain-of-custody log</span></label>

@@ -48,6 +48,8 @@ USB_VENDORS: Dict[str, str] = {
     "2a47": "Nothing (alternate)",
     "04c5": "Fujitsu",
     "1d4d": "Pegatron",
+    "1e0e": "Transsion (Tecno / Infinix / itel)",
+    "2ec1": "Transsion alternate",
 }
 
 # Common Android USB product IDs (Google composite / OEM MTP).

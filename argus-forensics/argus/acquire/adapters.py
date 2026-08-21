@@ -513,6 +513,10 @@ _VENDOR_MARKERS = {
     "xiaomi.miui": ("Xiaomi MIUI backup", ("miui", "descript.xml", ".bak")),
     "oppo.clone": ("OPPO/OnePlus Clone Phone backup", ("clonephone", "oppo")),
     "lg.backup": ("LG Backup", ("lgbackup", "lgb")),
+    "vivo.easyshare": ("Vivo EasyShare / BBK backup",
+                       ("easyshare", "vivobackup", ".vivobackup", "bbk")),
+    "transsion.clone": ("Transsion PhoneClone / HiOS / XOS backup",
+                        ("phoneclone", "letswitch", "hios", "xos")),
 }
 
 

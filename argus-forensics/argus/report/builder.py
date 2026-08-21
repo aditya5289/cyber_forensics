@@ -112,6 +112,10 @@ class ReportBuilder:
             data["extraction_log"] = self.session.extraction_log()
         if o.include_audit:
             data["audit"] = self.session.audit_trail()
+        try:
+            data["folio"] = self.session.folio()
+        except Exception:
+            data["folio"] = {}
         return data
 
     # -------------------------------------------------------------- dispatch
@@ -471,6 +475,88 @@ class ReportBuilder:
     def _write_html(self, path: Path) -> None:
         path.write_text(self._html_document(), encoding="utf-8")
 
+    def _html_method_provenance(self) -> str:
+        """What this extraction actually did — not generic boilerplate."""
+        e = html.escape
+        o = self.data.get("overview") or {}
+        prov = o.get("provenance") or {}
+        acq = prov.get("acquisition_summary") or o.get("acquisition_summary") or {}
+        adb = acq.get("adb") or {}
+        mtp = acq.get("mtp") or {}
+        physical = prov.get("physical") or acq.get("physical") or {}
+        caveats = prov.get("caveats") or acq.get("caveats") or []
+        bits: List[str] = []
+        passes = adb.get("passes") or []
+        if passes:
+            bits.append("<dt>ADB passes</dt><dd>"
+                        + e(", ".join(str(p) for p in passes)) + "</dd>")
+        if adb.get("pulled"):
+            bits.append(f"<dt>ADB sources pulled</dt><dd>{int(adb['pulled']):,}</dd>")
+        if mtp.get("files_listed"):
+            pct = mtp.get("completeness_pct")
+            extra = f" ({pct}%)" if pct is not None else ""
+            bits.append(
+                f"<dt>MTP copy</dt><dd>{int(mtp.get('files_copied') or 0):,} of "
+                f"{int(mtp['files_listed']):,} listed file(s){e(str(extra))}</dd>")
+        dumped = physical.get("dumped") or []
+        if dumped:
+            bits.append("<dt>Physical partitions</dt><dd>"
+                        + e(", ".join(str(n) for n in dumped[:12])) + "</dd>")
+        crypto = physical.get("crypto") or ""
+        if crypto:
+            bits.append(f"<dt>Storage encryption</dt><dd>{e(str(crypto))}</dd>")
+        hashes = physical.get("hashes") or {}
+        if hashes:
+            shown = list(hashes.items())[:4]
+            bits.append(
+                "<dt>Partition SHA-256</dt><dd class=\"mono\">"
+                + "<br>".join(f"{e(str(k))}: {e(str(v)[:16])}…" for k, v in shown)
+                + "</dd>")
+        if physical.get("carved_files"):
+            bits.append(f"<dt>Carved from userdata</dt>"
+                        f"<dd>{int(physical['carved_files']):,} file(s) "
+                        f"(no original path — signature carve)</dd>")
+        if prov.get("mtp_completeness"):
+            bits.append("<dt>MTP shortfall</dt><dd>"
+                        + e(str(prov["mtp_completeness"])) + "</dd>")
+        if not bits and not caveats:
+            return ""
+        caveat_html = ""
+        if caveats:
+            caveat_html = "".join(
+                f"<p class=\"note\">{e(str(c))}</p>" for c in caveats[:6])
+        return (
+            "<p class=\"small\"><b>What this extraction actually did</b></p>"
+            f"<dl>{''.join(bits)}</dl>{caveat_html}"
+        )
+
+    def _html_folio(self) -> str:
+        folio = self.data.get("folio") or {}
+        if not folio.get("verdict"):
+            return ""
+        e = html.escape
+        paras = "".join(f"<p>{e(p)}</p>" for p in (folio.get("paragraphs") or [])[1:])
+        strengths = folio.get("strengths") or []
+        gaps = folio.get("gaps") or []
+        nxt = folio.get("next_action") or {}
+        lists = ""
+        if strengths:
+            lists += "<p><b>Held</b></p><ul>" + "".join(
+                f"<li>{e(s)}</li>" for s in strengths) + "</ul>"
+        if gaps:
+            lists += "<p><b>Not held / not claimed</b></p><ul>" + "".join(
+                f"<li>{e(s)}</li>" for s in gaps) + "</ul>"
+        next_html = ""
+        if nxt.get("label"):
+            next_html = (f"<p class=\"next\"><b>Next:</b> {e(nxt['label'])}"
+                         + (f" — {e(nxt.get('reason') or '')}" if nxt.get("reason")
+                            else "") + "</p>")
+        return (
+            "<div class=\"folio\"><div class=\"mark\">Examiner’s folio</div>"
+            f"<div class=\"verdict\">{e(folio['verdict'])}</div>"
+            f"{paras}{lists}{next_html}</div>"
+        )
+
     def _html_document(self) -> str:
         d, o = self.data, self.data["overview"]
         integ = d["integrity"]
@@ -593,6 +679,15 @@ tr.del:nth-child(even) td{{background:#f6ecfb}}
   text-transform:uppercase;letter-spacing:.08em;font-family:inherit}}
 .hbars{{display:flex;align-items:flex-end;gap:2px;height:90px;margin-top:6px}}
 .hb{{flex:1;background:var(--accent);border-radius:2px 2px 0 0;opacity:.85}}
+.folio{{border:1px solid #d4c4a0;background:#fbf8f1;padding:16px 20px;
+  margin:18px 0 28px;border-left:4px solid #8a7018}}
+.folio .mark{{font-size:10.5px;letter-spacing:.18em;text-transform:uppercase;
+  color:#8a7018;font-weight:700}}
+.folio .verdict{{font-family:Georgia,"Iowan Old Style",serif;font-size:17px;
+  line-height:1.45;margin:8px 0 10px;color:#1a1a1a}}
+.folio p{{margin:6px 0;font-size:12.5px}}
+.folio ul{{margin:6px 0 0 18px;font-size:12.5px}}
+.folio .next{{margin-top:10px;font-size:12.5px}}
 .note{{color:var(--mut);font-size:11.5px;font-style:italic}}
 .finding{{background:#fafbfc;border:1px solid var(--line);border-left-width:4px;
   border-radius:6px;padding:11px 14px;margin:11px 0}}
@@ -626,6 +721,8 @@ footer{{margin-top:44px;padding-top:14px;border-top:1px solid var(--line);
 </div>
 
 {banner}
+
+{self._html_folio()}
 
 <h2>1. Case and exhibit</h2>
 <div class="grid">
@@ -698,6 +795,7 @@ what was not attempted.</p>
     <li>The container was sealed and this report generated from the sealed
         container, not from the live filesystem.</li>
   </ol>
+  {self._html_method_provenance()}
   </div>
 </div>
 

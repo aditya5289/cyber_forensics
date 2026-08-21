@@ -14,6 +14,20 @@ def _read_json(path: Path) -> Optional[Dict[str, Any]]:
         return None
 
 
+def _find_manifest(raw_root: Path, name: str) -> Optional[Dict[str, Any]]:
+    candidates = [
+        raw_root / name,
+        raw_root / "adb" / name,
+        raw_root / "mtp_shared" / name,
+        raw_root / "physical" / name,
+    ]
+    for path in candidates:
+        data = _read_json(path)
+        if data:
+            return data
+    return None
+
+
 def build_acquisition_summary(raw_root: Path,
                               method: str = "") -> Dict[str, Any]:
     """Summarise what was acquired before decode — for UI and audit."""
@@ -21,15 +35,16 @@ def build_acquisition_summary(raw_root: Path,
         "method": method,
         "adb": {},
         "mtp": {},
+        "physical": {},
         "comms_providers": [],
         "comms_row_total": 0,
         "sources_pulled": 0,
         "sources_failed": 0,
         "data_types": {},
+        "caveats": [],
     }
 
-    adb_path = raw_root / "argus-adb-manifest.json"
-    adb = _read_json(adb_path)
+    adb = _find_manifest(raw_root, "argus-adb-manifest.json")
     if adb:
         sm = adb.get("summary") or {}
         summary["adb"] = {
@@ -46,17 +61,54 @@ def build_acquisition_summary(raw_root: Path,
         summary["comms_row_total"] = sum(
             int(p.get("rows") or 0) for p in providers)
 
-    mtp_path = raw_root / "argus-mtp-manifest.json"
-    mtp = _read_json(mtp_path)
+    mtp = _find_manifest(raw_root, "argus-mtp-manifest.json")
     if mtp:
+        listed = int(mtp.get("files_listed") or 0)
+        copied = int(mtp.get("files_copied") or 0)
+        pct = mtp.get("completeness_pct")
+        if pct is None and listed:
+            pct = round(100.0 * copied / listed, 1)
         summary["mtp"] = {
-            "files_listed": mtp.get("files_listed", 0),
-            "files_copied": mtp.get("files_copied", 0),
+            "files_listed": listed,
+            "files_copied": copied,
             "bytes_copied": mtp.get("bytes_copied", 0),
             "missing": len(mtp.get("missing") or []),
             "volumes": mtp.get("volumes") or [],
+            "completeness_pct": pct,
+            "top_missing_folders": mtp.get("top_missing_folders") or [],
         }
-        summary["sources_pulled"] += int(mtp.get("files_copied") or 0)
+        summary["sources_pulled"] += copied
+        if listed and copied < listed:
+            summary["caveats"].append(
+                f"MTP copied {copied:,} of {listed:,} listed files "
+                f"({pct}%). Missing files are not evidence of absence.")
+
+    phys = _find_manifest(raw_root, "argus-physical-manifest.json")
+    if phys:
+        summary["physical"] = {
+            "rooted": phys.get("rooted"),
+            "crypto": phys.get("crypto") or "",
+            "bytes": phys.get("bytes") or 0,
+            "carved_files": phys.get("carved_files") or 0,
+            "dumped": phys.get("dumped") or [],
+            "failed": phys.get("failed") or [],
+            "hashes": phys.get("hashes") or {},
+            "partitions": phys.get("partitions") or [],
+            "notes": phys.get("notes") or [],
+            "method_note": phys.get("method_note") or "",
+        }
+        summary["sources_pulled"] += len(phys.get("dumped") or [])
+        crypto = str(phys.get("crypto") or "").lower()
+        if crypto in ("file", "fbe") or "encrypt" in crypto:
+            summary["caveats"].append(
+                "Physical userdata is file-based encrypted. The image is a "
+                "valid exhibit; file contents stay ciphertext until keys "
+                "from metadata/keymaster or the lock-screen derived key "
+                "are applied. Signature carving recovers only unencrypted "
+                "or leftover plaintext.")
+        for note in (phys.get("notes") or [])[:4]:
+            if note not in summary["caveats"]:
+                summary["caveats"].append(note)
 
     # Count logical dump files on disk
     content_dir = raw_root / "logical" / "content"

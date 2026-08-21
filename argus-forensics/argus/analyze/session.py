@@ -161,6 +161,7 @@ class AnalysisSession:
             "data_sources": [s for lc in self.loaded for s in lc.db.sources()],
             "tags": self._merged_tags(),
             "integrity": self.integrity_report(),
+            "provenance": self._extraction_provenance(),
         }
 
     def triage(self) -> Dict[str, Any]:
@@ -223,6 +224,14 @@ class AnalysisSession:
             "device": ov.get("device") or {},
             "method": ov.get("method") or "",
         }
+
+    def folio(self) -> Dict[str, Any]:
+        """Complete-sentence examination brief for the command center and report."""
+        from .folio import compose_folio
+        ov = self.overview()
+        return compose_folio(
+            ov, self.triage(), ov.get("provenance") or {},
+            self._comms_quality())
 
     def _merged_tags(self) -> List[Dict[str, Any]]:
         merged: Dict[str, Dict[str, Any]] = {}
@@ -776,6 +785,14 @@ class AnalysisSession:
                 mtp_missing = [f"{name} ({count})" for name, count in top_missing[:6]]
             except (OSError, json.JSONDecodeError, TypeError):
                 pass
+        phys_manifest = lc.container.path / "raw" / "physical" / "argus-physical-manifest.json"
+        physical: Dict[str, Any] = dict(
+            (ext.get("acquisition_summary") or {}).get("physical") or {})
+        if phys_manifest.is_file() and not physical:
+            try:
+                physical = json.loads(phys_manifest.read_text(encoding="utf-8"))
+            except (OSError, json.JSONDecodeError, TypeError):
+                physical = {}
         seen = int(ext.get("decode_files_seen") or 0)
         parsed = int(ext.get("decode_files_parsed") or 0)
         coverage = float(ext.get("decode_coverage_pct") or 0)
@@ -802,6 +819,9 @@ class AnalysisSession:
             "preprocess_summary": ext.get("preprocess_summary") or {},
             "device_make": ext.get("device_make", ""),
             "device_model": ext.get("device_model", ""),
+            "physical": physical,
+            "caveats": ((ext.get("acquisition_summary") or {}).get("caveats")
+                        or physical.get("notes") or []),
         }
 
     def _comms_quality(self) -> Dict[str, Any]:
@@ -961,6 +981,9 @@ class AnalysisSession:
             alerts=len(triage.get("alerts") or []),
             encrypted_stores=len(triage.get("encrypted_stores") or []),
         )
+        from .folio import compose_folio
+        folio = compose_folio(
+            ov, triage, ov.get("provenance") or {}, self._comms_quality())
         deep_stats: Dict[str, Any] = {}
         if total and total <= 25_000:
             try:
@@ -995,6 +1018,7 @@ class AnalysisSession:
             },
             "triage": triage,
             "health": health,
+            "folio": folio,
             "coverage": coverage,
             "temporal": temporal,
             "recent": self._recent_activity(14),

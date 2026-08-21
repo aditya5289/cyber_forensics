@@ -46,7 +46,7 @@ ALL_CATEGORIES = [c.value for c in Category]
 class AcquisitionPlan:
     """Everything Steps 8–11 collect, in one reviewable object."""
 
-    method: str = "logical"                 # logical|filesystem|backup|import|comprehensive|mtp
+    method: str = "logical"                 # logical|filesystem|backup|import|comprehensive|mtp|physical
     time_span: str = "all"                  # Step 9
     categories: List[str] = field(default_factory=lambda: list(ALL_CATEGORIES))
     operator: str = ""                      # Step 11
@@ -76,6 +76,7 @@ class AcquisitionPlan:
     skip_content_sniff: bool = False
     ingest_workers: Optional[int] = None
     fast_seal: bool = False
+    physical_full: bool = False
 
     def validate(self) -> None:
         if not self.operator:
@@ -168,7 +169,7 @@ def apply_turbo_settings(plan: AcquisitionPlan) -> None:
 
 def _write_incomplete(container: EvidenceContainer, plan: AcquisitionPlan,
                       device: Optional[DetectedDevice]) -> None:
-    if plan.method == "import":
+    if plan.method in ("import", "sim", "cloud"):
         return
     payload = {
         "format": "argus-incomplete/1",
@@ -218,7 +219,33 @@ class AcquisitionEngine:
     def check_support(self, plan: AcquisitionPlan) -> Dict[str, Any]:
         """Gate the extraction against the device manual before touching data."""
         from .ios_live import looks_like_apple
+        if plan.method in ("sim", "cloud", "import"):
+            labels = {
+                "sim": "SIM dump import",
+                "cloud": "Cloud export import",
+                "import": "Import existing extraction",
+            }
+            return {
+                "method": plan.method,
+                "label": labels[plan.method],
+                "risk": "low",
+                "note": ("Off-device evidence. ARGUS does not drive a SIM "
+                         "reader or log into cloud accounts."),
+            }
         if looks_like_apple(plan.device_name):
+            if plan.method == "physical":
+                raise DeviceNotSupportedError(
+                    "iOS physical imaging (BootROM / AFU) is not implemented. "
+                    "Use Backup on an unlocked, trusted iPhone.")
+            if plan.method in ("sim", "cloud", "import"):
+                return {
+                    "method": plan.method,
+                    "label": {"sim": "SIM dump import",
+                              "cloud": "Cloud export import",
+                              "import": "Import"}.get(plan.method, plan.method),
+                    "risk": "low",
+                    "note": "Off-device evidence — no live iPhone action.",
+                }
             return {
                 "method": "backup",
                 "label": "iOS logical backup",
@@ -226,6 +253,27 @@ class AcquisitionEngine:
                 "note": ("Apple device — logical backup / Camera Roll copy. "
                          "Keep the handset unlocked and trusted."),
             }
+        if plan.method == "physical":
+            note = (
+                "Bit-for-bit partition images over a root ADB shell, then a "
+                "full comprehensive overlay so allocated files keep their paths. "
+                "Requires Magisk, an engineering build, or custom recovery.")
+            if not plan.device_name.strip():
+                return {"method": "physical", "label": "Physical extraction",
+                        "risk": "high", "note": note}
+            for method in ("physical", "filesystem", "logical"):
+                try:
+                    cap = self.manual.assert_supported(
+                        plan.device_name, plan.lock_state, method)
+                    out = cap.as_dict()
+                    out["method"] = "physical"
+                    out["label"] = "Physical extraction"
+                    out["note"] = note
+                    return out
+                except DeviceNotSupportedError:
+                    continue
+            return {"method": "physical", "label": "Physical extraction",
+                    "risk": "high", "note": note}
         if plan.method == "comprehensive":
             for method in ("logical", "filesystem"):
                 try:
@@ -235,8 +283,10 @@ class AcquisitionEngine:
                     out["method"] = "comprehensive"
                     out["label"] = "Comprehensive (god-level)"
                     out["note"] = (
-                        "4-pass acquisition: logical query, app DB discovery, "
-                        "filesystem pull, dumpsys & Vivo/BBK backup exports.")
+                        "God-level acquisition: logical query, app DB discovery, "
+                        "filesystem pull, shared messenger/crypt harvest, "
+                        "dumpsys/vendor, live state, user APKs. Root pulls "
+                        "files/shared_prefs when the shell is uid=0.")
                     return out
                 except DeviceNotSupportedError:
                     continue
@@ -285,12 +335,20 @@ class AcquisitionEngine:
             method=plan.method,
             started_at=datetime.now(timezone.utc).isoformat(timespec="seconds"))
 
+        from .ios_live import looks_like_apple
+        apple = looks_like_apple(plan.device_name) or (
+            device and (device.os_family or "").lower() in ("ios", "ipados"))
+        if apple and plan.method in ("comprehensive", "turbo", "filesystem",
+                                     "logical", "mtp"):
+            plan.method = "backup"
+            report.method = "backup"
+
         # The capability matrix gates *device* actions only. An import replays
         # bytes that were already lawfully acquired, so there is no device to
         # damage and nothing to gate — but the device is still recorded so the
         # container states what the evidence came from.
         capability: Dict[str, Any] = {}
-        if plan.device_name and plan.method != "import":
+        if plan.device_name and plan.method not in ("import", "sim", "cloud"):
             try:
                 capability = self.check_support(plan)
             except DeviceNotSupportedError as exc:
@@ -378,7 +436,7 @@ class AcquisitionEngine:
 
         staging = Path(tempfile.mkdtemp(prefix="argus-acq-"))
         monitor_serial = device.serial if device else (plan.serial or "")
-        if monitor_serial and plan.method not in ("import", "mtp"):
+        if monitor_serial and plan.method not in ("import", "mtp", "sim", "cloud"):
             from .monitor import ExtractionMonitor
             self._monitor = ExtractionMonitor(
                 monitor_serial, log=lambda *a, **k: self._log(container, *a, **k),
@@ -534,10 +592,12 @@ class AcquisitionEngine:
         raw_root.mkdir(parents=True, exist_ok=True)
         log = lambda *a, **k: self._log(container, *a, **k)
 
-        if plan.method == "import":
+        if plan.method in ("import", "sim", "cloud"):
             src = Path(plan.source_path or "")
             if not src.exists():
-                raise AcquisitionError(f"import source not found: {src}")
+                kind = {"sim": "SIM dump", "cloud": "cloud export"}.get(
+                    plan.method, "import source")
+                raise AcquisitionError(f"{kind} not found: {src}")
 
             # Format detection is delegated to the adapter registry, so ARGUS
             # accepts another tool's extraction as readily as its own. Most
@@ -553,6 +613,18 @@ class AcquisitionEngine:
                 f"Identified as {described['label']}: {src}")
 
             staged = adapters.stage(src, raw_root, plan)
+            if plan.method == "sim":
+                staged.notes.insert(
+                    0,
+                    "SIM/USIM dump import. Deleted SMS remain on the card until "
+                    "overwritten; ARGUS flags unused records rather than inventing "
+                    "text from 0xFF padding.")
+            elif plan.method == "cloud":
+                staged.notes.insert(
+                    0,
+                    "Cloud export import (Google Takeout, iCloud, OEM cloud). "
+                    "ARGUS does not log into cloud accounts — this is an "
+                    "examiner-supplied archive, not a live cloud extraction.")
             report.files_acquired += staged.files
             report.bytes_acquired += staged.bytes_staged
             report.warnings.extend(staged.warnings[:80])
@@ -626,14 +698,38 @@ class AcquisitionEngine:
                 level="warning")
 
         if dev.os_family == "Android":
-            if dev.transport == "mtp" and plan.method != "mtp":
-                log("device", "note",
-                    "Handset is in file-transfer (MTP) mode, not USB debugging — "
-                    "switching acquisition to MTP.",
-                    level="warning")
-                plan.method = "mtp"
+            adb_wanted = plan.method in (
+                "logical", "filesystem", "turbo", "comprehensive",
+                "backup", "physical")
+            if dev.transport == "mtp" and adb_wanted:
+                adb_serial = android_adb.live_adb_serial(plan.serial)
+                if adb_serial:
+                    log("device", "ok",
+                        "USB debugging is live — using ADB instead of MTP "
+                        f"for {plan.method} (serial {adb_serial[:24]})")
+                    from ..devices.detect import DetectedDevice
+                    dev = DetectedDevice(
+                        transport="adb", serial=adb_serial,
+                        make=dev.make, model=dev.model,
+                        marketing_name=dev.marketing_name or dev.name,
+                        os_family="Android", os_version=dev.os_version,
+                        lock_state=dev.lock_state, trusted=True,
+                        raw=dict(dev.raw or {}, adb_serial=adb_serial),
+                    )
+                elif plan.method == "physical":
+                    raise AcquisitionError(
+                        "Physical extraction needs USB debugging and a root "
+                        "shell. Enable Developer options → USB debugging, "
+                        "authorise this workstation, then retry.")
+                else:
+                    log("device", "note",
+                        "Handset is in file-transfer (MTP) mode, not USB "
+                        "debugging — switching acquisition to MTP.",
+                        level="warning")
+                    plan.method = "mtp"
 
-            if plan.method == "mtp" or dev.transport == "mtp":
+            if plan.method == "mtp" or (
+                    dev.transport == "mtp" and not adb_wanted):
                 from . import mtp
                 from .monitor import MtpExtractionMonitor
                 label = ((dev.raw or {}).get("mtp_name")
@@ -690,19 +786,23 @@ class AcquisitionEngine:
                         "(enable Developer options → USB debugging, then re-run "
                         "with ADB) or an on-device backup app export.",
                         level="warning")
-                adb_res = android_adb.acquire_communications(
-                    raw_root, categories=plan.categories, log=log,
-                    # 180s was routinely too tight for an examiner enabling
-                    # Developer options and USB debugging for the first time
-                    # on a phone they don't own — finding the toggle alone
-                    # can eat most of that window.
-                    wait_seconds=300, force_comms=True)
-                if adb_res.pulled:
-                    report.files_acquired += len(adb_res.pulled)
-                    report.bytes_acquired += adb_res.bytes_total
-                    log("adb.comms", "ok",
-                        f"Pulled {len(adb_res.pulled)} communication source(s) "
-                        f"({_human(adb_res.bytes_total)})")
+                serial = android_adb.wait_for_authorized_adb(log, timeout=300)
+                if serial:
+                    log("adb", "ok",
+                        "USB debugging authorised during MTP — running "
+                        "comprehensive overlay (logical, apps, filesystem, APKs)")
+                    overlay_session = android_adb.AdbSession(serial)
+                    overlay = android_adb.comprehensive_acquire(
+                        overlay_session, raw_root / "adb", plan.categories, log,
+                        skip_existing=resumed or plan.turbo,
+                        verify=plan.verify_pulls,
+                        parallel=plan.parallel_pulls,
+                        skip_app_discovery=plan.skip_app_discovery)
+                    report.files_acquired += len(overlay.pulled)
+                    report.bytes_acquired += overlay.bytes_total
+                    android_adb.write_adb_manifest(
+                        raw_root / "adb", overlay, method="comprehensive",
+                        serial=serial)
                 log("mtp", "ok",
                     f"Copied {mtp_result.files_copied} of "
                     f"{mtp_result.files_listed} listed file(s), "
@@ -744,6 +844,39 @@ class AcquisitionEngine:
                         extra_providers=vendor_providers)
                 elif plan.method in ("filesystem", "turbo"):
                     res = android_adb.pull_filesystem(session, raw_root, **pull_kw)
+                elif plan.method == "physical":
+                    from . import android_physical
+                    phys = android_physical.acquire(
+                        session, raw_root / "physical", log=log,
+                        full=plan.physical_full,
+                        hash_files=plan.verify_pulls and not plan.turbo,
+                        resume=resumed,
+                        carve=plan.recover_deleted and not plan.turbo)
+                    report.notes.extend(phys.notes[:12])
+                    report.warnings.extend(phys.failed[:40])
+                    if not phys.dumped:
+                        log("adb.physical", "warning",
+                            "No partition images landed — continuing with "
+                            "comprehensive overlay so allocated files are still taken.",
+                            level="warning")
+                    res = phys.as_pull()
+                    overlay = android_adb.comprehensive_acquire(
+                        session, raw_root, plan.categories, log,
+                        skip_existing=resumed or plan.turbo,
+                        verify=plan.verify_pulls,
+                        parallel=plan.parallel_pulls,
+                        skip_app_discovery=plan.skip_app_discovery,
+                        vendor_fs=vendor_fs, vendor_comm=vendor_comm,
+                        vendor_providers=vendor_providers)
+                    _merge = android_adb.PullResult()
+                    for part in (res, overlay):
+                        _merge.pulled.extend(part.pulled)
+                        _merge.skipped.extend(part.skipped)
+                        _merge.failed.extend(part.failed)
+                        _merge.bytes_total += part.bytes_total
+                        _merge.integrity_failures.extend(part.integrity_failures)
+                        _merge.passes.extend(part.passes)
+                    res = _merge
                 elif plan.method == "comprehensive":
                     res = android_adb.comprehensive_acquire(
                         session, raw_root, plan.categories, log,
@@ -757,15 +890,25 @@ class AcquisitionEngine:
                     ab = android_adb.create_backup(session, staging,
                                                    plan.backup_password or "", log)
                     if not ab:
-                        raise AcquisitionError(
-                            "adb backup returned no data (Android 12+ restricts it; "
-                            "try the filesystem or comprehensive method)")
-                    n, warns = android_backup.extract(ab, raw_root,
-                                                      plan.backup_password)
-                    report.files_acquired += n
-                    report.warnings.extend(warns)
-                    res = android_adb.PullResult(pulled=[str(ab)],
-                                                 bytes_total=ab.stat().st_size)
+                        log("adb.backup", "warning",
+                            "adb backup returned no data (typical on Android 12+) "
+                            "— falling through to comprehensive extraction.",
+                            level="warning")
+                        res = android_adb.comprehensive_acquire(
+                            session, raw_root, plan.categories, log,
+                            skip_existing=resumed or plan.turbo,
+                            verify=plan.verify_pulls,
+                            parallel=plan.parallel_pulls,
+                            skip_app_discovery=plan.skip_app_discovery,
+                            vendor_fs=vendor_fs, vendor_comm=vendor_comm,
+                            vendor_providers=vendor_providers)
+                    else:
+                        n, warns = android_backup.extract(ab, raw_root,
+                                                          plan.backup_password)
+                        report.files_acquired += n
+                        report.warnings.extend(warns)
+                        res = android_adb.PullResult(pulled=[str(ab)],
+                                                     bytes_total=ab.stat().st_size)
                 else:
                     raise AcquisitionError(
                         f"method '{plan.method}' is not implemented for Android")
@@ -792,6 +935,9 @@ class AcquisitionEngine:
                         log("adb.comms", "ok",
                             f"Communications supplement — {len(comms.pulled)} "
                             f"source(s), {_human(comms.bytes_total)}")
+                self._mtp_shared_overlay(
+                    raw_root, report, plan, resumed, log,
+                    identity=identity, device=dev)
             finally:
                 if awake:
                     android_adb.disable_keep_awake(session)
@@ -817,6 +963,59 @@ class AcquisitionEngine:
             return raw_root
 
         raise AcquisitionError(f"unsupported platform: {dev.os_family}")
+
+    def _mtp_shared_overlay(self, raw_root: Path, report: AcquisitionReport,
+                            plan: AcquisitionPlan, resumed: bool,
+                            log: Callable[..., None],
+                            identity: Optional[Dict[str, Any]] = None,
+                            device: Optional[DetectedDevice] = None) -> None:
+        """Copy MTP shared storage alongside an ADB extraction when the phone mounts."""
+        if plan.turbo:
+            return
+        try:
+            from . import mtp
+        except Exception:
+            return
+        if not mtp.available():
+            return
+        devices = mtp.devices()
+        if not devices:
+            return
+        dest = raw_root / "mtp_shared"
+        dest.mkdir(parents=True, exist_ok=True)
+        if self._monitor:
+            try:
+                self._monitor.stop()
+            except Exception:
+                pass
+        ident = identity or {}
+        chosen = mtp.pick_device(
+            devices,
+            name=plan.device_name or (device.name if device else ""),
+            serial=plan.serial or (device.serial if device else ""),
+            hints=[
+                ident.get("mtp_name") or "",
+                ident.get("model") or "",
+                ident.get("make") or "",
+                getattr(device, "marketing_name", "") or "",
+                getattr(device, "model", "") or "",
+            ],
+        )
+        label = chosen.name if chosen else devices[0].name
+        log("mtp", "start",
+            f"Dual-source overlay — copying MTP shared storage ({label})")
+        result = mtp.acquire(
+            label, dest,
+            progress=lambda msg, **extra: log("mtp", "progress", msg, **extra),
+            hash_files=plan.verify_pulls and not plan.turbo,
+            resume=resumed, turbo=plan.turbo)
+        report.files_acquired += result.files_copied
+        report.bytes_acquired += result.bytes_copied
+        report.warnings.extend(result.warnings[:20])
+        mtp.write_manifest(result, dest / "argus-mtp-manifest.json")
+        log("mtp", "ok",
+            f"MTP overlay — {result.files_copied} file(s), "
+            f"{_human(result.bytes_copied)}")
 
     def _ios_backup(self, src: Path, raw_root: Path,
                     container: EvidenceContainer, report: AcquisitionReport,
@@ -1074,7 +1273,7 @@ class AcquisitionEngine:
             self._warn_missing_gps(container, report, plan)
             return
         method = (container.extraction.get("method") or plan.method or "").lower()
-        if method in ("comprehensive", "logical", "filesystem", "turbo"):
+        if method in ("comprehensive", "logical", "filesystem", "turbo", "physical"):
             note = (
                 f"No {' / '.join(gaps)} decoded despite {method} extraction. "
                 f"On non-root Vivo handsets, contacts/calls often return 0 from "
@@ -1158,7 +1357,8 @@ def _device_fields(device: Dict[str, Any]) -> Dict[str, str]:
 
 def _guess_platform(root: Path) -> str:
     markers_android = ["data/data", "sdcard", "build.prop", "packages.list",
-                       "apps/", "mmssms.db", "contacts2.db"]
+                       "apps/", "mmssms.db", "contacts2.db",
+                       "argus-physical-manifest.json", "physical/images"]
     markers_ios = ["HomeDomain", "CameraRollDomain", "Manifest.db", "sms.db",
                    "AddressBook.sqlitedb", "Library/SMS", "100APPLE",
                    "ios_backup", "ios_media"]

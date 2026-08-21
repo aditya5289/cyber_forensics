@@ -60,6 +60,10 @@ PROVIDERS: Dict[str, Tuple[str, str]] = {
     "audio": ("content://media/external/audio/media", "Files & Media"),
     "downloads": ("content://downloads/my_downloads", "Files & Media"),
     "calendar": ("content://com.android.calendar/events", "Calendar"),
+    "sms_draft": ("content://sms/draft", "Messages"),
+    "sms_outbox": ("content://sms/outbox", "Messages"),
+    "voicemail": ("content://com.android.voicemail/voicemail", "Calls"),
+    "browser": ("content://browser/bookmarks", "Web"),
 }
 
 # Fallback URIs when the primary content provider refuses (common on BBK/Vivo).
@@ -129,6 +133,13 @@ COMM_EXPORT_PATHS: List[Tuple[str, str]] = [
     ("/sdcard/Samsung/backup", "Other"),
     ("/sdcard/Google Messages", "Messages"),
     ("/storage/emulated/0/Google Messages", "Messages"),
+    ("/sdcard/HiOS", "Other"),
+    ("/sdcard/XOS", "Other"),
+    ("/sdcard/PhoneClone", "Other"),
+    ("/sdcard/OPPO/Backup", "Other"),
+    ("/sdcard/ColorOS/Backup", "Other"),
+    ("/storage/emulated/0/HiOS", "Other"),
+    ("/storage/emulated/0/PhoneClone", "Other"),
 ]
 
 _COMM_CATEGORIES = frozenset({
@@ -144,6 +155,18 @@ _DUMPSYS_COMMS = (
 _DUMPSYS_LOCATION = (
     ("location", "dumpsys location", "Places"),
     ("fused", "dumpsys fused_location", "Places"),
+)
+
+# Extra dumpsys for Comprehensive — high yield when providers return empty.
+_DUMPSYS_EXTRA = (
+    ("usagestats", "dumpsys usagestats", "Applications"),
+    ("appops", "dumpsys appops", "Applications"),
+    ("account", "dumpsys account", "Accounts"),
+    ("wifi", "dumpsys wifi", "Networks"),
+    ("netstats", "dumpsys netstats", "Networks"),
+    ("clipboard", "dumpsys clipboard", "Messages"),
+    ("telecom_dump", "dumpsys telecom", "Calls"),
+    ("media_session", "dumpsys media_session", "Files & Media"),
 )
 
 # Paths pulled by the file-system action, in priority order
@@ -179,6 +202,27 @@ FS_TARGETS: List[Tuple[str, str]] = [
     ("/data/data/com.samsung.android.messaging/databases", "Messages"),
     ("/data/data/com.samsung.android.dialer/databases", "Calls"),
     ("/storage/emulated/0", "Files & Media"),
+    ("/data/system/locksettings.db", "Security"),
+    ("/data/system/users/0/settings_secure.xml", "Security"),
+    ("/data/system_ce/0", "Security"),
+    ("/data/misc/keystore", "Security"),
+    ("/data/system/usagestats", "Applications"),
+    ("/data/system/netstats", "Networks"),
+    ("/data/data/com.whatsapp/databases", "Messages"),
+    ("/data/data/com.whatsapp.w4b/databases", "Messages"),
+    ("/data/data/org.thoughtcrime.securesms/databases", "Messages"),
+    ("/data/data/org.telegram.messenger/files", "Messages"),
+    ("/data/data/org.telegram.messenger/databases", "Messages"),
+    ("/data/data/com.facebook.orca/databases", "Messages"),
+    ("/data/data/com.instagram.android/databases", "Messages"),
+    ("/data/data/com.tencent.mm/MicroMsg", "Messages"),
+    ("/data/data/jp.naver.line.android/databases", "Messages"),
+    ("/data/data/com.viber.voip/databases", "Messages"),
+    ("/data/data/com.transsion.smartmessage/databases", "Messages"),
+    ("/data/data/com.coloros.mms/databases", "Messages"),
+    ("/data/data/com.google.android.gms/databases", "Accounts"),
+    ("/data/user_de/0", "Other"),
+    ("/sdcard/Android/media/com.whatsapp/WhatsApp/Databases", "Chats"),
 ]
 
 SIDECARS = ("-wal", "-shm", "-journal")
@@ -193,6 +237,10 @@ CHAT_FS_TARGETS: List[Tuple[str, str]] = [
     ("/sdcard/Android/data/org.thoughtcrime.securesms", "Chats"),
     ("/sdcard/GBWhatsApp", "Chats"),
     ("/sdcard/OGWhatsApp", "Chats"),
+    ("/sdcard/WhatsApp/Backups", "Chats"),
+    ("/sdcard/Android/media/com.whatsapp.w4b", "Chats"),
+    ("/sdcard/Android/data/com.whatsapp", "Chats"),
+    ("/sdcard/Android/data/com.tencent.mm", "Chats"),
 ]
 
 _MEDIA_CATEGORIES = frozenset({
@@ -544,7 +592,15 @@ def probe_capabilities(session: AdbSession) -> Dict[str, Any]:
         return out
     try:
         out["root"] = session.has_root
-        out["recommended_method"] = "comprehensive"
+        try:
+            from .android_physical import probe_root
+            if probe_root(session):
+                out["root"] = True
+                out["recommended_method"] = "physical"
+            else:
+                out["recommended_method"] = "comprehensive"
+        except Exception:
+            out["recommended_method"] = "comprehensive"
         from .android_apps import discover_app_databases
 
         discovered = discover_app_databases(session, limit=60)
@@ -554,6 +610,38 @@ def probe_capabilities(session: AdbSession) -> Dict[str, Any]:
     except Exception:
         pass
     return out
+
+
+def capture_live_state(session: AdbSession, dest: Path,
+                       log: Optional[Callable[..., None]] = None) -> PullResult:
+    """Settings, identity dumps, and a bounded logcat snapshot."""
+    result = PullResult()
+    out_dir = dest / "live_state"
+    out_dir.mkdir(parents=True, exist_ok=True)
+    commands = (
+        ("settings_secure.txt", "settings list secure"),
+        ("settings_system.txt", "settings list system"),
+        ("settings_global.txt", "settings list global"),
+        ("iphonesubinfo.txt", "dumpsys iphonesubinfo"),
+        ("logcat_tail.txt", "logcat -d -t 2000"),
+        ("ip_addr.txt", "ip addr"),
+        ("df.txt", "df -h"),
+    )
+    for name, command in commands:
+        try:
+            text = session.shell(command, timeout=45)
+        except AcquisitionError:
+            continue
+        if not isinstance(text, str) or len(text.strip()) < 20:
+            continue
+        target = out_dir / name
+        target.write_text(text, encoding="utf-8", errors="replace")
+        result.pulled.append(command)
+        result.bytes_total += target.stat().st_size
+    if log and result.pulled:
+        log("adb.live", "ok",
+            f"Live state — {len(result.pulled)} dump(s)")
+    return result
 
 
 def comprehensive_acquire(session: AdbSession, dest: Path,
@@ -572,7 +660,7 @@ def comprehensive_acquire(session: AdbSession, dest: Path,
 
     overall = PullResult()
     overall.passes = []
-    total_passes = 4 if not skip_app_discovery else 3
+    total_passes = 7 if not skip_app_discovery else 5
     pass_no = 1
     if log:
         log("adb.comprehensive", "progress",
@@ -644,6 +732,62 @@ def comprehensive_acquire(session: AdbSession, dest: Path,
     overall.passes.append("comms")
     _merge_pull(overall, comms)
 
+    extra_dump = export_dumpsys(
+        session, dest, _DUMPSYS_EXTRA, categories=categories, log=log)
+    if extra_dump.pulled:
+        overall.passes.append("dumpsys_extra")
+        _merge_pull(overall, extra_dump)
+
+    from .android_apps import (
+        discover_shared_crypt, pull_root_app_trees, pull_shared_app_trees,
+    )
+    pass_no += 1
+    if log:
+        log("adb.comprehensive", "progress",
+            f"Pass {pass_no}/{total_passes} — shared messenger trees & crypt hunt",
+            phase="transfer", progress_current=pass_no - 1,
+            progress_total=total_passes)
+    crypt_paths = [] if skip_app_discovery else discover_shared_crypt(
+        session, log=log)
+    shared = pull_shared_app_trees(
+        session, dest / "shared", log=log,
+        skip_existing=skip_existing, verify=verify,
+        extra_paths=crypt_paths)
+    if shared.pulled:
+        overall.passes.append("shared")
+        _merge_pull(overall, shared)
+    if session.has_root:
+        rooted = pull_root_app_trees(
+            session, dest / "root_apps", log=log,
+            skip_existing=skip_existing, verify=verify)
+        if rooted.pulled:
+            overall.passes.append("root_apps")
+            _merge_pull(overall, rooted)
+
+    live = capture_live_state(session, dest, log=log)
+    if live.pulled:
+        overall.passes.append("live_state")
+        _merge_pull(overall, live)
+
+    pass_no += 1
+    if log:
+        log("adb.comprehensive", "progress",
+            f"Pass {pass_no}/{total_passes} — application APKs",
+            phase="transfer", progress_current=pass_no - 1,
+            progress_total=total_passes)
+    try:
+        from .android_apps import pull_user_apks
+        apks = pull_user_apks(session, dest / "apks", log=log,
+                              skip_existing=skip_existing)
+        if apks.pulled:
+            overall.passes.append("apks")
+            _merge_pull(overall, apks)
+    except Exception as exc:
+        if log:
+            log("adb.comprehensive", "warning",
+                f"APK pull skipped: {type(exc).__name__}: {exc}",
+                level="warning")
+
     if log:
         log("adb.comprehensive", "ok",
             f"Comprehensive acquisition complete — "
@@ -672,6 +816,8 @@ def export_dumpsys(session: AdbSession, dest: Path,
                 text = session.shell(command, timeout=300)
             except AcquisitionError:
                 continue
+        if not isinstance(text, str):
+            continue
         if not text or len(text.strip()) < 40:
             continue
         target = out_dir / f"{key}.txt"
@@ -1044,6 +1190,21 @@ def adb_device_states() -> Dict[str, List[str]]:
         bucket = state if state in states else "other"
         states[bucket].append(serial)
     return states
+
+
+def live_adb_serial(preferred: Optional[str] = None) -> Optional[str]:
+    """Pick an authorized ADB serial, preferring ``preferred`` when it is live."""
+    serials = list_authorized_serials()
+    if not serials:
+        return None
+    if preferred and preferred in serials:
+        return preferred
+    if preferred:
+        want = preferred.lower()
+        for serial in serials:
+            if serial.lower() in want or want in serial.lower():
+                return serial
+    return serials[0]
 
 
 def _restart_adb_server() -> None:

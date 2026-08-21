@@ -75,7 +75,8 @@ METHOD_INFO: Dict[str, Dict[str, Any]] = {
             "God-level multi-pass acquisition: logical content-provider query, "
             "dynamic app database discovery, file-system pull with WAL sidecars, "
             "then dumpsys/backup-export fallbacks for Funtouch/Vivo handsets. "
-            "Recommended default for maximum recoverable data on non-root Android."),
+            "Recommended default for maximum recoverable data on non-root Android. "
+            "Adds user APKs and an MTP overlay when the phone also mounts."),
         "risk": "medium",
         "yields_deleted": True,
         "typical_duration_min": 90,
@@ -93,9 +94,12 @@ METHOD_INFO: Dict[str, Dict[str, Any]] = {
     "physical": {
         "label": "Physical extraction",
         "description": (
-            "Bit-for-bit image of the flash storage. Highest yield including "
-            "unallocated space, but requires an exploit or bootloader access "
-            "and is unavailable on most modern encrypted devices."),
+            "Bit-for-bit images of evidential block devices (userdata, metadata, "
+            "persist, radio NV) through a root ADB shell, followed by a full "
+            "comprehensive overlay so allocated files keep their paths. Requires "
+            "Magisk, an engineering build, or custom recovery — ARGUS does not "
+            "exploit bootloaders or talk EDL. File-based encryption means the "
+            "userdata image may be ciphertext until keys are applied."),
         "risk": "high",
         "yields_deleted": True,
         "typical_duration_min": 180,

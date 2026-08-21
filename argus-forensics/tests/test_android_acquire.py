@@ -95,11 +95,26 @@ class TestComprehensiveAcquire(unittest.TestCase):
           with mock.patch(
               "argus.acquire.android_adb.acquire_comms_supplement",
               return_value=android_adb.PullResult()) as comms:
-            with tempfile.TemporaryDirectory() as tmp:
-              dest = Path(tmp)
-              result = android_adb.comprehensive_acquire(session, dest)
-    self.assertEqual(len(result.pulled), 2)
-    self.assertEqual(result.bytes_total, 30)
+            with mock.patch("argus.acquire.android_apps.pull_user_apks",
+                            return_value=android_adb.PullResult(
+                                pulled=["/data/app/a.apk"], bytes_total=5)):
+              with mock.patch(
+                  "argus.acquire.android_apps.discover_shared_crypt",
+                  return_value=[]):
+                with mock.patch(
+                    "argus.acquire.android_apps.pull_shared_app_trees",
+                    return_value=android_adb.PullResult()):
+                  with mock.patch(
+                      "argus.acquire.android_apps.pull_root_app_trees",
+                      return_value=android_adb.PullResult()):
+                    with mock.patch(
+                        "argus.acquire.android_adb.capture_live_state",
+                        return_value=android_adb.PullResult()):
+                      with tempfile.TemporaryDirectory() as tmp:
+                        dest = Path(tmp)
+                        result = android_adb.comprehensive_acquire(session, dest)
+    self.assertEqual(len(result.pulled), 3)
+    self.assertEqual(result.bytes_total, 35)
     self.assertEqual(result.failed, ["/data/y: denied"])
     lq.assert_called_once()
     disc.assert_called_once()
@@ -145,6 +160,30 @@ class TestEngineAndroidAdbImport(unittest.TestCase):
                         plan, container, staging, dev, report, resumed=False)
         self.assertTrue(raw.exists())
         comp.assert_called_once()
+
+
+class TestSharedHarvest(unittest.TestCase):
+  def test_parse_find_paths(self) -> None:
+    text = "/sdcard/WhatsApp/Databases/msgstore.db.crypt14\nnot a path\n/sdcard/key\n"
+    paths = android_apps.parse_find_paths(text)
+    self.assertEqual(paths[0].endswith("crypt14"), True)
+    self.assertIn("/sdcard/key", paths)
+
+  def test_live_state_skips_mock_shell(self) -> None:
+    session = mock.Mock()
+    session.shell.return_value = mock.Mock()
+    with tempfile.TemporaryDirectory() as tmp:
+      result = android_adb.capture_live_state(session, Path(tmp))
+    self.assertEqual(result.pulled, [])
+
+  def test_live_state_writes_settings(self) -> None:
+    session = mock.Mock()
+    session.shell.return_value = "android_id=abc123\n" * 4
+    with tempfile.TemporaryDirectory() as tmp:
+      dest = Path(tmp)
+      result = android_adb.capture_live_state(session, dest)
+      self.assertGreater(len(result.pulled), 0)
+      self.assertTrue((dest / "live_state" / "settings_secure.txt").is_file())
 
 
 if __name__ == "__main__":

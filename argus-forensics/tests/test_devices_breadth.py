@@ -32,7 +32,8 @@ class CatalogueBreadth(unittest.TestCase):
         makes = {p.make for p in self.manual.profiles}
         for expected in ("Apple", "Samsung", "Xiaomi", "Google", "OnePlus",
                          "Motorola", "Oppo", "Vivo", "Realme", "Nokia",
-                         "Huawei", "Honor", "Sony", "Tecno", "Infinix"):
+                         "Huawei", "Honor", "Sony", "Tecno", "Infinix",
+                         "itel"):
             self.assertIn(expected, makes)
 
     def test_catalogue_is_substantial(self) -> None:

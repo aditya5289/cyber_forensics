@@ -14,6 +14,7 @@ from __future__ import annotations
 import re
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from dataclasses import dataclass
+from pathlib import Path
 from typing import Callable, List, Optional, Tuple
 
 # Packages whose databases ARGUS parsers understand well.
@@ -39,7 +40,49 @@ KNOWN_APPS: dict[str, str] = {
     "com.coloros.backuprestore": "Other",
     "com.miui.cloudbackup": "Other",
     "com.vivo.easyshare": "Other",
+    "com.tencent.mm": "Messages",
+    "jp.naver.line.android": "Messages",
+    "org.thoughtcrime.securesms": "Messages",
+    "com.google.android.apps.maps": "Places",
+    "com.transsion.smartmessage": "Messages",
+    "com.transsion.phonemaster": "Other",
+    "com.transsion.letswitch": "Other",
+    "com.coloros.mms": "Messages",
+    "com.oppo.mms": "Messages",
+    "com.motorola.ccc.notification": "Messages",
+    "com.truecaller": "Calls",
+    "com.imo.android.imoim": "Messages",
+    "com.botim.android": "Messages",
 }
+
+# Shared-storage trees that survive without root. WhatsApp crypt backups,
+# Telegram media, and OEM clone-phone folders live here — not under /data/data.
+SHARED_APP_TREES: List[Tuple[str, str]] = [
+    ("/sdcard/Android/media/com.whatsapp", "Chats"),
+    ("/sdcard/Android/media/com.whatsapp.w4b", "Chats"),
+    ("/sdcard/Android/media/org.telegram.messenger", "Chats"),
+    ("/sdcard/Android/media/org.thoughtcrime.securesms", "Chats"),
+    ("/sdcard/Android/data/com.whatsapp", "Chats"),
+    ("/sdcard/Android/data/com.whatsapp.w4b", "Chats"),
+    ("/sdcard/Android/data/org.telegram.messenger", "Chats"),
+    ("/sdcard/Android/data/org.thoughtcrime.securesms", "Chats"),
+    ("/sdcard/Android/data/com.tencent.mm", "Chats"),
+    ("/sdcard/Android/data/jp.naver.line.android", "Chats"),
+    ("/sdcard/Android/data/com.facebook.orca", "Chats"),
+    ("/sdcard/WhatsApp/Databases", "Chats"),
+    ("/sdcard/WhatsApp/Backups", "Chats"),
+    ("/storage/emulated/0/Android/media/com.whatsapp", "Chats"),
+    ("/storage/emulated/0/WhatsApp/Databases", "Chats"),
+]
+
+ROOT_APP_SUBDIRS = ("databases", "files", "shared_prefs", "no_backup")
+
+_CRYPT_FIND = (
+    "find /sdcard /storage/emulated/0 -type f "
+    "\\( -name 'msgstore*.db.crypt*' -o -name '*.crypt12' "
+    "-o -name '*.crypt14' -o -name '*.crypt15' -o -name 'wa.db' "
+    "-o -name 'msgstore.db' -o -name 'key' \\) 2>/dev/null | head -n 120"
+)
 
 DB_NAME_HINTS = (
     "msgstore", "messages", "sms", "mmssms", "contacts", "calllog",
@@ -186,7 +229,7 @@ def pull_discovered_app_databases(session, dest: Path,
     if not databases:
         return result
     dest.mkdir(parents=True, exist_ok=True)
-    for db in databases[:80]:
+    for db in databases[:180]:
         safe = db.remote_path.strip("/").replace("/", "__")
         local = dest / safe
         if skip_existing and local.is_file() and local.stat().st_size > 0:
@@ -201,4 +244,172 @@ def pull_discovered_app_databases(session, dest: Path,
                 pass
         else:
             result.failed.append(f"{db.remote_path}: {msg}")
+    return result
+
+
+def pull_user_apks(session, dest: Path,
+                   log: Optional[Callable[..., None]] = None,
+                   *, skip_existing: bool = False, limit: int = 120):
+    """Pull installed user APKs so the exhibit holds the binaries, not just data."""
+    from .android_adb import PullResult
+
+    result = PullResult()
+    dest.mkdir(parents=True, exist_ok=True)
+    listing = session.shell("pm list packages -3 -f") or session.shell("pm list packages -f")
+    if not isinstance(listing, str):
+        listing = ""
+    pulled = 0
+    for line in listing.splitlines():
+        if pulled >= limit:
+            break
+        line = line.strip()
+        if not line.startswith("package:"):
+            continue
+        body = line[len("package:"):]
+        if "=" not in body:
+            continue
+        apk_path, pkg = body.rsplit("=", 1)
+        apk_path = apk_path.strip()
+        pkg = pkg.strip()
+        if not apk_path.endswith(".apk"):
+            continue
+        local = dest / f"{pkg}.apk"
+        if skip_existing and local.is_file() and local.stat().st_size > 0:
+            result.skipped.append(apk_path)
+            continue
+        ok, msg = session.pull(apk_path, local, verify=False, log=log)
+        if ok:
+            result.pulled.append(apk_path)
+            pulled += 1
+            try:
+                result.bytes_total += local.stat().st_size
+            except OSError:
+                pass
+        else:
+            result.failed.append(f"{pkg}: {msg}")
+    if log and result.pulled:
+        log("adb.apk", "ok", f"Pulled {len(result.pulled)} user APK(s)")
+    return result
+
+
+def parse_find_paths(text: str) -> List[str]:
+    """Parse ``find`` output into absolute remote paths."""
+    found: List[str] = []
+    if not isinstance(text, str):
+        return found
+    for line in text.splitlines():
+        line = line.strip()
+        if line.startswith("/") and " " not in line[:3]:
+            found.append(line)
+    return found[:120]
+
+
+def discover_shared_crypt(session, log: Optional[Callable[..., None]] = None
+                          ) -> List[str]:
+    """Locate WhatsApp crypt backups and key files on shared storage."""
+    try:
+        text = session.shell(_CRYPT_FIND, timeout=90)
+    except Exception:
+        return []
+    paths = parse_find_paths(text)
+    if log and paths:
+        log("adb.discover", "ok",
+            f"Shared-storage crypt/key hunt — {len(paths)} file(s)")
+    return paths
+
+
+def pull_shared_app_trees(session, dest: Path,
+                          log: Optional[Callable[..., None]] = None,
+                          *, skip_existing: bool = False,
+                          verify: bool = True,
+                          extra_paths: Optional[List[str]] = None):
+    """Pull messenger trees that live on shared storage (no root required)."""
+    from .android_adb import PullResult
+
+    result = PullResult()
+    dest.mkdir(parents=True, exist_ok=True)
+    work: List[Tuple[str, str]] = list(SHARED_APP_TREES)
+    for path in extra_paths or []:
+        work.append((path, "Chats"))
+    seen: set[str] = set()
+    for remote, category in work:
+        if remote in seen:
+            continue
+        seen.add(remote)
+        try:
+            present = session.exists(remote)
+        except Exception:
+            continue
+        if present is not True and present is not False:
+            # Unit-test mocks — do not treat a Mock as a live path.
+            continue
+        if not present:
+            result.skipped.append(remote)
+            continue
+        local = dest / remote.lstrip("/")
+        if skip_existing and local.exists():
+            result.skipped.append(remote)
+            continue
+        ok, msg = session.pull(remote, local, verify=verify, log=log)
+        if ok:
+            result.pulled.append(remote)
+            try:
+                result.bytes_total += sum(
+                    p.stat().st_size for p in local.rglob("*") if p.is_file()
+                ) if local.is_dir() else local.stat().st_size
+            except OSError:
+                pass
+            if log:
+                log("adb.shared", "ok",
+                    f"{remote} ({category})", category=category)
+        else:
+            result.failed.append(f"{remote}: {msg}")
+    return result
+
+
+def pull_root_app_trees(session, dest: Path,
+                        log: Optional[Callable[..., None]] = None,
+                        *, skip_existing: bool = False,
+                        verify: bool = True):
+    """With a root shell, pull files/shared_prefs/databases for known apps."""
+    from .android_adb import PullResult
+
+    result = PullResult()
+    if not getattr(session, "has_root", False):
+        return result
+    dest.mkdir(parents=True, exist_ok=True)
+    try:
+        installed = set(parse_package_list(
+            session.shell("pm list packages -u")))
+    except Exception:
+        installed = set(KNOWN_APPS)
+    targets = [pkg for pkg in KNOWN_APPS if pkg in installed] or list(KNOWN_APPS)
+    for package in targets:
+        for sub in ROOT_APP_SUBDIRS:
+            remote = f"/data/data/{package}/{sub}"
+            try:
+                present = session.exists(remote)
+            except Exception:
+                continue
+            if present is not True:
+                continue
+            local = dest / package / sub
+            if skip_existing and local.exists():
+                result.skipped.append(remote)
+                continue
+            ok, msg = session.pull(remote, local, verify=verify, log=log)
+            if ok:
+                result.pulled.append(remote)
+                try:
+                    result.bytes_total += sum(
+                        p.stat().st_size for p in local.rglob("*") if p.is_file()
+                    ) if local.is_dir() else local.stat().st_size
+                except OSError:
+                    pass
+            else:
+                result.failed.append(f"{remote}: {msg}")
+    if log and result.pulled:
+        log("adb.root", "ok",
+            f"Root app trees — {len(result.pulled)} path(s) from "
+            f"{len(targets)} known package(s)")
     return result

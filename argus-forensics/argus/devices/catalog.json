@@ -5916,6 +5916,407 @@
   },
   {
    "make": "Samsung",
+   "model": "Galaxy A05",
+   "aliases": [
+    "SM-A055F",
+    "a05m"
+   ],
+   "os_family": "Android",
+   "os_versions": "13 - 15",
+   "chipset": "MediaTek Helio G85",
+   "codename": "a05m",
+   "released": "2023-10",
+   "connector": "USB-C",
+   "capabilities": [
+    {
+     "lock_state": "unlocked",
+     "method": "sim",
+     "supported": true,
+     "note": "",
+     "requires": []
+    },
+    {
+     "lock_state": "unlocked",
+     "method": "screenshot",
+     "supported": true,
+     "note": "",
+     "requires": []
+    },
+    {
+     "lock_state": "afu",
+     "method": "sim",
+     "supported": true,
+     "note": "",
+     "requires": []
+    },
+    {
+     "lock_state": "afu",
+     "method": "screenshot",
+     "supported": true,
+     "note": "",
+     "requires": []
+    },
+    {
+     "lock_state": "bfu",
+     "method": "sim",
+     "supported": true,
+     "note": "",
+     "requires": []
+    },
+    {
+     "lock_state": "bfu",
+     "method": "screenshot",
+     "supported": true,
+     "note": "",
+     "requires": []
+    },
+    {
+     "lock_state": "locked",
+     "method": "sim",
+     "supported": true,
+     "note": "",
+     "requires": []
+    },
+    {
+     "lock_state": "locked",
+     "method": "screenshot",
+     "supported": true,
+     "note": "",
+     "requires": []
+    },
+    {
+     "lock_state": "unlocked",
+     "method": "logical",
+     "supported": true,
+     "note": "Requires USB debugging enabled and the workstation key authorised.",
+     "requires": []
+    },
+    {
+     "lock_state": "unlocked",
+     "method": "backup",
+     "supported": true,
+     "note": "adb backup is deprecated from Android 12 and many apps opt out.",
+     "requires": []
+    },
+    {
+     "lock_state": "unlocked",
+     "method": "filesystem",
+     "supported": true,
+     "note": "Full /data access requires root or a vendor service exploit.",
+     "requires": []
+    },
+    {
+     "lock_state": "unlocked",
+     "method": "cloud",
+     "supported": true,
+     "note": "Requires separate legal authority.",
+     "requires": []
+    },
+    {
+     "lock_state": "afu",
+     "method": "logical",
+     "supported": true,
+     "note": "",
+     "requires": []
+    },
+    {
+     "lock_state": "afu",
+     "method": "backup",
+     "supported": true,
+     "note": "",
+     "requires": []
+    },
+    {
+     "lock_state": "unlocked",
+     "method": "physical",
+     "supported": true,
+     "note": "BootROM DA (Kamakiri-class) yields an image at any lock state, but file-based encryption keeps user data wrapped until first unlock, so a BFU image carries little content.",
+     "requires": []
+    },
+    {
+     "lock_state": "afu",
+     "method": "physical",
+     "supported": true,
+     "note": "BootROM DA (Kamakiri-class) yields an image at any lock state, but file-based encryption keeps user data wrapped until first unlock, so a BFU image carries little content.",
+     "requires": []
+    },
+    {
+     "lock_state": "bfu",
+     "method": "physical",
+     "supported": true,
+     "note": "BootROM DA (Kamakiri-class) yields an image at any lock state, but file-based encryption keeps user data wrapped until first unlock, so a BFU image carries little content.",
+     "requires": []
+    },
+    {
+     "lock_state": "locked",
+     "method": "physical",
+     "supported": true,
+     "note": "BootROM DA (Kamakiri-class) yields an image at any lock state, but file-based encryption keeps user data wrapped until first unlock, so a BFU image carries little content.",
+     "requires": []
+    }
+   ],
+   "notes": ""
+  },
+  {
+   "make": "Samsung",
+   "model": "Galaxy A15",
+   "aliases": [
+    "SM-A155F",
+    "a15"
+   ],
+   "os_family": "Android",
+   "os_versions": "14 - 15",
+   "chipset": "MediaTek Helio G99",
+   "codename": "a15",
+   "released": "2023-12",
+   "connector": "USB-C",
+   "capabilities": [
+    {
+     "lock_state": "unlocked",
+     "method": "sim",
+     "supported": true,
+     "note": "",
+     "requires": []
+    },
+    {
+     "lock_state": "unlocked",
+     "method": "screenshot",
+     "supported": true,
+     "note": "",
+     "requires": []
+    },
+    {
+     "lock_state": "afu",
+     "method": "sim",
+     "supported": true,
+     "note": "",
+     "requires": []
+    },
+    {
+     "lock_state": "afu",
+     "method": "screenshot",
+     "supported": true,
+     "note": "",
+     "requires": []
+    },
+    {
+     "lock_state": "bfu",
+     "method": "sim",
+     "supported": true,
+     "note": "",
+     "requires": []
+    },
+    {
+     "lock_state": "bfu",
+     "method": "screenshot",
+     "supported": true,
+     "note": "",
+     "requires": []
+    },
+    {
+     "lock_state": "locked",
+     "method": "sim",
+     "supported": true,
+     "note": "",
+     "requires": []
+    },
+    {
+     "lock_state": "locked",
+     "method": "screenshot",
+     "supported": true,
+     "note": "",
+     "requires": []
+    },
+    {
+     "lock_state": "unlocked",
+     "method": "logical",
+     "supported": true,
+     "note": "Requires USB debugging enabled and the workstation key authorised.",
+     "requires": []
+    },
+    {
+     "lock_state": "unlocked",
+     "method": "backup",
+     "supported": true,
+     "note": "adb backup is deprecated from Android 12 and many apps opt out.",
+     "requires": []
+    },
+    {
+     "lock_state": "unlocked",
+     "method": "filesystem",
+     "supported": true,
+     "note": "Full /data access requires root or a vendor service exploit.",
+     "requires": []
+    },
+    {
+     "lock_state": "unlocked",
+     "method": "cloud",
+     "supported": true,
+     "note": "Requires separate legal authority.",
+     "requires": []
+    },
+    {
+     "lock_state": "afu",
+     "method": "logical",
+     "supported": true,
+     "note": "",
+     "requires": []
+    },
+    {
+     "lock_state": "afu",
+     "method": "backup",
+     "supported": true,
+     "note": "",
+     "requires": []
+    },
+    {
+     "lock_state": "unlocked",
+     "method": "physical",
+     "supported": true,
+     "note": "BootROM DA (Kamakiri-class) yields an image at any lock state, but file-based encryption keeps user data wrapped until first unlock, so a BFU image carries little content.",
+     "requires": []
+    },
+    {
+     "lock_state": "afu",
+     "method": "physical",
+     "supported": true,
+     "note": "BootROM DA (Kamakiri-class) yields an image at any lock state, but file-based encryption keeps user data wrapped until first unlock, so a BFU image carries little content.",
+     "requires": []
+    },
+    {
+     "lock_state": "bfu",
+     "method": "physical",
+     "supported": true,
+     "note": "BootROM DA (Kamakiri-class) yields an image at any lock state, but file-based encryption keeps user data wrapped until first unlock, so a BFU image carries little content.",
+     "requires": []
+    },
+    {
+     "lock_state": "locked",
+     "method": "physical",
+     "supported": true,
+     "note": "BootROM DA (Kamakiri-class) yields an image at any lock state, but file-based encryption keeps user data wrapped until first unlock, so a BFU image carries little content.",
+     "requires": []
+    }
+   ],
+   "notes": ""
+  },
+  {
+   "make": "Samsung",
+   "model": "Galaxy A25",
+   "aliases": [
+    "SM-A256E",
+    "a25x"
+   ],
+   "os_family": "Android",
+   "os_versions": "14 - 15",
+   "chipset": "Exynos 1280",
+   "codename": "a25x",
+   "released": "2023-12",
+   "connector": "USB-C",
+   "capabilities": [
+    {
+     "lock_state": "unlocked",
+     "method": "sim",
+     "supported": true,
+     "note": "",
+     "requires": []
+    },
+    {
+     "lock_state": "unlocked",
+     "method": "screenshot",
+     "supported": true,
+     "note": "",
+     "requires": []
+    },
+    {
+     "lock_state": "afu",
+     "method": "sim",
+     "supported": true,
+     "note": "",
+     "requires": []
+    },
+    {
+     "lock_state": "afu",
+     "method": "screenshot",
+     "supported": true,
+     "note": "",
+     "requires": []
+    },
+    {
+     "lock_state": "bfu",
+     "method": "sim",
+     "supported": true,
+     "note": "",
+     "requires": []
+    },
+    {
+     "lock_state": "bfu",
+     "method": "screenshot",
+     "supported": true,
+     "note": "",
+     "requires": []
+    },
+    {
+     "lock_state": "locked",
+     "method": "sim",
+     "supported": true,
+     "note": "",
+     "requires": []
+    },
+    {
+     "lock_state": "locked",
+     "method": "screenshot",
+     "supported": true,
+     "note": "",
+     "requires": []
+    },
+    {
+     "lock_state": "unlocked",
+     "method": "logical",
+     "supported": true,
+     "note": "Requires USB debugging enabled and the workstation key authorised.",
+     "requires": []
+    },
+    {
+     "lock_state": "unlocked",
+     "method": "backup",
+     "supported": true,
+     "note": "adb backup is deprecated from Android 12 and many apps opt out.",
+     "requires": []
+    },
+    {
+     "lock_state": "unlocked",
+     "method": "filesystem",
+     "supported": true,
+     "note": "Full /data access requires root or a vendor service exploit.",
+     "requires": []
+    },
+    {
+     "lock_state": "unlocked",
+     "method": "cloud",
+     "supported": true,
+     "note": "Requires separate legal authority.",
+     "requires": []
+    },
+    {
+     "lock_state": "afu",
+     "method": "logical",
+     "supported": true,
+     "note": "",
+     "requires": []
+    },
+    {
+     "lock_state": "afu",
+     "method": "backup",
+     "supported": true,
+     "note": "",
+     "requires": []
+    }
+   ],
+   "notes": ""
+  },
+  {
+   "make": "Samsung",
    "model": "Galaxy J5",
    "aliases": [
     "SM-J500F",
@@ -7607,6 +8008,292 @@
   },
   {
    "make": "Xiaomi",
+   "model": "Redmi A2",
+   "aliases": [
+    "23028RNCAG",
+    "cloud"
+   ],
+   "os_family": "Android",
+   "os_versions": "12 - 13",
+   "chipset": "Unisoc T606",
+   "codename": "cloud",
+   "released": "2023-03",
+   "connector": "USB-C",
+   "capabilities": [
+    {
+     "lock_state": "unlocked",
+     "method": "sim",
+     "supported": true,
+     "note": "",
+     "requires": []
+    },
+    {
+     "lock_state": "unlocked",
+     "method": "screenshot",
+     "supported": true,
+     "note": "",
+     "requires": []
+    },
+    {
+     "lock_state": "afu",
+     "method": "sim",
+     "supported": true,
+     "note": "",
+     "requires": []
+    },
+    {
+     "lock_state": "afu",
+     "method": "screenshot",
+     "supported": true,
+     "note": "",
+     "requires": []
+    },
+    {
+     "lock_state": "bfu",
+     "method": "sim",
+     "supported": true,
+     "note": "",
+     "requires": []
+    },
+    {
+     "lock_state": "bfu",
+     "method": "screenshot",
+     "supported": true,
+     "note": "",
+     "requires": []
+    },
+    {
+     "lock_state": "locked",
+     "method": "sim",
+     "supported": true,
+     "note": "",
+     "requires": []
+    },
+    {
+     "lock_state": "locked",
+     "method": "screenshot",
+     "supported": true,
+     "note": "",
+     "requires": []
+    },
+    {
+     "lock_state": "unlocked",
+     "method": "logical",
+     "supported": true,
+     "note": "Requires USB debugging enabled and the workstation key authorised.",
+     "requires": []
+    },
+    {
+     "lock_state": "unlocked",
+     "method": "backup",
+     "supported": true,
+     "note": "adb backup is deprecated from Android 12 and many apps opt out.",
+     "requires": []
+    },
+    {
+     "lock_state": "unlocked",
+     "method": "filesystem",
+     "supported": true,
+     "note": "Full /data access requires root or a vendor service exploit.",
+     "requires": []
+    },
+    {
+     "lock_state": "unlocked",
+     "method": "cloud",
+     "supported": true,
+     "note": "Requires separate legal authority.",
+     "requires": []
+    },
+    {
+     "lock_state": "afu",
+     "method": "logical",
+     "supported": true,
+     "note": "",
+     "requires": []
+    },
+    {
+     "lock_state": "afu",
+     "method": "backup",
+     "supported": true,
+     "note": "",
+     "requires": []
+    },
+    {
+     "lock_state": "unlocked",
+     "method": "physical",
+     "supported": true,
+     "note": "SPRD boot ROM diagnostic mode yields an image at any lock state, but file-based encryption keeps user data wrapped until first unlock, so a BFU image carries little content.",
+     "requires": []
+    },
+    {
+     "lock_state": "afu",
+     "method": "physical",
+     "supported": true,
+     "note": "SPRD boot ROM diagnostic mode yields an image at any lock state, but file-based encryption keeps user data wrapped until first unlock, so a BFU image carries little content.",
+     "requires": []
+    },
+    {
+     "lock_state": "bfu",
+     "method": "physical",
+     "supported": true,
+     "note": "SPRD boot ROM diagnostic mode yields an image at any lock state, but file-based encryption keeps user data wrapped until first unlock, so a BFU image carries little content.",
+     "requires": []
+    },
+    {
+     "lock_state": "locked",
+     "method": "physical",
+     "supported": true,
+     "note": "SPRD boot ROM diagnostic mode yields an image at any lock state, but file-based encryption keeps user data wrapped until first unlock, so a BFU image carries little content.",
+     "requires": []
+    }
+   ],
+   "notes": ""
+  },
+  {
+   "make": "Xiaomi",
+   "model": "Redmi 13C",
+   "aliases": [
+    "23106RN0DA",
+    "gale"
+   ],
+   "os_family": "Android",
+   "os_versions": "13 - 15",
+   "chipset": "MediaTek Helio G85",
+   "codename": "gale",
+   "released": "2023-11",
+   "connector": "USB-C",
+   "capabilities": [
+    {
+     "lock_state": "unlocked",
+     "method": "sim",
+     "supported": true,
+     "note": "",
+     "requires": []
+    },
+    {
+     "lock_state": "unlocked",
+     "method": "screenshot",
+     "supported": true,
+     "note": "",
+     "requires": []
+    },
+    {
+     "lock_state": "afu",
+     "method": "sim",
+     "supported": true,
+     "note": "",
+     "requires": []
+    },
+    {
+     "lock_state": "afu",
+     "method": "screenshot",
+     "supported": true,
+     "note": "",
+     "requires": []
+    },
+    {
+     "lock_state": "bfu",
+     "method": "sim",
+     "supported": true,
+     "note": "",
+     "requires": []
+    },
+    {
+     "lock_state": "bfu",
+     "method": "screenshot",
+     "supported": true,
+     "note": "",
+     "requires": []
+    },
+    {
+     "lock_state": "locked",
+     "method": "sim",
+     "supported": true,
+     "note": "",
+     "requires": []
+    },
+    {
+     "lock_state": "locked",
+     "method": "screenshot",
+     "supported": true,
+     "note": "",
+     "requires": []
+    },
+    {
+     "lock_state": "unlocked",
+     "method": "logical",
+     "supported": true,
+     "note": "Requires USB debugging enabled and the workstation key authorised.",
+     "requires": []
+    },
+    {
+     "lock_state": "unlocked",
+     "method": "backup",
+     "supported": true,
+     "note": "adb backup is deprecated from Android 12 and many apps opt out.",
+     "requires": []
+    },
+    {
+     "lock_state": "unlocked",
+     "method": "filesystem",
+     "supported": true,
+     "note": "Full /data access requires root or a vendor service exploit.",
+     "requires": []
+    },
+    {
+     "lock_state": "unlocked",
+     "method": "cloud",
+     "supported": true,
+     "note": "Requires separate legal authority.",
+     "requires": []
+    },
+    {
+     "lock_state": "afu",
+     "method": "logical",
+     "supported": true,
+     "note": "",
+     "requires": []
+    },
+    {
+     "lock_state": "afu",
+     "method": "backup",
+     "supported": true,
+     "note": "",
+     "requires": []
+    },
+    {
+     "lock_state": "unlocked",
+     "method": "physical",
+     "supported": true,
+     "note": "BootROM DA (Kamakiri-class) yields an image at any lock state, but file-based encryption keeps user data wrapped until first unlock, so a BFU image carries little content.",
+     "requires": []
+    },
+    {
+     "lock_state": "afu",
+     "method": "physical",
+     "supported": true,
+     "note": "BootROM DA (Kamakiri-class) yields an image at any lock state, but file-based encryption keeps user data wrapped until first unlock, so a BFU image carries little content.",
+     "requires": []
+    },
+    {
+     "lock_state": "bfu",
+     "method": "physical",
+     "supported": true,
+     "note": "BootROM DA (Kamakiri-class) yields an image at any lock state, but file-based encryption keeps user data wrapped until first unlock, so a BFU image carries little content.",
+     "requires": []
+    },
+    {
+     "lock_state": "locked",
+     "method": "physical",
+     "supported": true,
+     "note": "BootROM DA (Kamakiri-class) yields an image at any lock state, but file-based encryption keeps user data wrapped until first unlock, so a BFU image carries little content.",
+     "requires": []
+    }
+   ],
+   "notes": ""
+  },
+  {
+   "make": "Xiaomi",
    "model": "Redmi 10",
    "aliases": [
     "21061119AG",
@@ -8725,6 +9412,148 @@
   },
   {
    "make": "Oppo",
+   "model": "A18",
+   "aliases": [
+    "CPH2591"
+   ],
+   "os_family": "Android",
+   "os_versions": "13 - 14",
+   "chipset": "MediaTek Helio G85",
+   "codename": "",
+   "released": "2023-09",
+   "connector": "USB-C",
+   "capabilities": [
+    {
+     "lock_state": "unlocked",
+     "method": "sim",
+     "supported": true,
+     "note": "",
+     "requires": []
+    },
+    {
+     "lock_state": "unlocked",
+     "method": "screenshot",
+     "supported": true,
+     "note": "",
+     "requires": []
+    },
+    {
+     "lock_state": "afu",
+     "method": "sim",
+     "supported": true,
+     "note": "",
+     "requires": []
+    },
+    {
+     "lock_state": "afu",
+     "method": "screenshot",
+     "supported": true,
+     "note": "",
+     "requires": []
+    },
+    {
+     "lock_state": "bfu",
+     "method": "sim",
+     "supported": true,
+     "note": "",
+     "requires": []
+    },
+    {
+     "lock_state": "bfu",
+     "method": "screenshot",
+     "supported": true,
+     "note": "",
+     "requires": []
+    },
+    {
+     "lock_state": "locked",
+     "method": "sim",
+     "supported": true,
+     "note": "",
+     "requires": []
+    },
+    {
+     "lock_state": "locked",
+     "method": "screenshot",
+     "supported": true,
+     "note": "",
+     "requires": []
+    },
+    {
+     "lock_state": "unlocked",
+     "method": "logical",
+     "supported": true,
+     "note": "Requires USB debugging enabled and the workstation key authorised.",
+     "requires": []
+    },
+    {
+     "lock_state": "unlocked",
+     "method": "backup",
+     "supported": true,
+     "note": "adb backup is deprecated from Android 12 and many apps opt out.",
+     "requires": []
+    },
+    {
+     "lock_state": "unlocked",
+     "method": "filesystem",
+     "supported": true,
+     "note": "Full /data access requires root or a vendor service exploit.",
+     "requires": []
+    },
+    {
+     "lock_state": "unlocked",
+     "method": "cloud",
+     "supported": true,
+     "note": "Requires separate legal authority.",
+     "requires": []
+    },
+    {
+     "lock_state": "afu",
+     "method": "logical",
+     "supported": true,
+     "note": "",
+     "requires": []
+    },
+    {
+     "lock_state": "afu",
+     "method": "backup",
+     "supported": true,
+     "note": "",
+     "requires": []
+    },
+    {
+     "lock_state": "unlocked",
+     "method": "physical",
+     "supported": true,
+     "note": "BootROM DA (Kamakiri-class) yields an image at any lock state, but file-based encryption keeps user data wrapped until first unlock, so a BFU image carries little content.",
+     "requires": []
+    },
+    {
+     "lock_state": "afu",
+     "method": "physical",
+     "supported": true,
+     "note": "BootROM DA (Kamakiri-class) yields an image at any lock state, but file-based encryption keeps user data wrapped until first unlock, so a BFU image carries little content.",
+     "requires": []
+    },
+    {
+     "lock_state": "bfu",
+     "method": "physical",
+     "supported": true,
+     "note": "BootROM DA (Kamakiri-class) yields an image at any lock state, but file-based encryption keeps user data wrapped until first unlock, so a BFU image carries little content.",
+     "requires": []
+    },
+    {
+     "lock_state": "locked",
+     "method": "physical",
+     "supported": true,
+     "note": "BootROM DA (Kamakiri-class) yields an image at any lock state, but file-based encryption keeps user data wrapped until first unlock, so a BFU image carries little content.",
+     "requires": []
+    }
+   ],
+   "notes": ""
+  },
+  {
+   "make": "Oppo",
    "model": "A78",
    "aliases": [
     "CPH2565"
@@ -9247,6 +10076,575 @@
    "codename": "",
    "released": "2021-08",
    "connector": "Micro-USB",
+   "capabilities": [
+    {
+     "lock_state": "unlocked",
+     "method": "sim",
+     "supported": true,
+     "note": "",
+     "requires": []
+    },
+    {
+     "lock_state": "unlocked",
+     "method": "screenshot",
+     "supported": true,
+     "note": "",
+     "requires": []
+    },
+    {
+     "lock_state": "afu",
+     "method": "sim",
+     "supported": true,
+     "note": "",
+     "requires": []
+    },
+    {
+     "lock_state": "afu",
+     "method": "screenshot",
+     "supported": true,
+     "note": "",
+     "requires": []
+    },
+    {
+     "lock_state": "bfu",
+     "method": "sim",
+     "supported": true,
+     "note": "",
+     "requires": []
+    },
+    {
+     "lock_state": "bfu",
+     "method": "screenshot",
+     "supported": true,
+     "note": "",
+     "requires": []
+    },
+    {
+     "lock_state": "locked",
+     "method": "sim",
+     "supported": true,
+     "note": "",
+     "requires": []
+    },
+    {
+     "lock_state": "locked",
+     "method": "screenshot",
+     "supported": true,
+     "note": "",
+     "requires": []
+    },
+    {
+     "lock_state": "unlocked",
+     "method": "logical",
+     "supported": true,
+     "note": "Requires USB debugging enabled and the workstation key authorised.",
+     "requires": []
+    },
+    {
+     "lock_state": "unlocked",
+     "method": "backup",
+     "supported": true,
+     "note": "adb backup is deprecated from Android 12 and many apps opt out.",
+     "requires": []
+    },
+    {
+     "lock_state": "unlocked",
+     "method": "filesystem",
+     "supported": true,
+     "note": "Full /data access requires root or a vendor service exploit.",
+     "requires": []
+    },
+    {
+     "lock_state": "unlocked",
+     "method": "cloud",
+     "supported": true,
+     "note": "Requires separate legal authority.",
+     "requires": []
+    },
+    {
+     "lock_state": "afu",
+     "method": "logical",
+     "supported": true,
+     "note": "",
+     "requires": []
+    },
+    {
+     "lock_state": "afu",
+     "method": "backup",
+     "supported": true,
+     "note": "",
+     "requires": []
+    },
+    {
+     "lock_state": "unlocked",
+     "method": "physical",
+     "supported": true,
+     "note": "BootROM DA (Kamakiri-class) yields an image at any lock state, but file-based encryption keeps user data wrapped until first unlock, so a BFU image carries little content.",
+     "requires": []
+    },
+    {
+     "lock_state": "afu",
+     "method": "physical",
+     "supported": true,
+     "note": "BootROM DA (Kamakiri-class) yields an image at any lock state, but file-based encryption keeps user data wrapped until first unlock, so a BFU image carries little content.",
+     "requires": []
+    },
+    {
+     "lock_state": "bfu",
+     "method": "physical",
+     "supported": true,
+     "note": "BootROM DA (Kamakiri-class) yields an image at any lock state, but file-based encryption keeps user data wrapped until first unlock, so a BFU image carries little content.",
+     "requires": []
+    },
+    {
+     "lock_state": "locked",
+     "method": "physical",
+     "supported": true,
+     "note": "BootROM DA (Kamakiri-class) yields an image at any lock state, but file-based encryption keeps user data wrapped until first unlock, so a BFU image carries little content.",
+     "requires": []
+    }
+   ],
+   "notes": ""
+  },
+  {
+   "make": "Vivo",
+   "model": "Y02",
+   "aliases": [
+    "V2217",
+    "Y02"
+   ],
+   "os_family": "Android",
+   "os_versions": "12 - 13",
+   "chipset": "MediaTek Helio P35",
+   "codename": "",
+   "released": "2022-04",
+   "connector": "Micro-USB",
+   "capabilities": [
+    {
+     "lock_state": "unlocked",
+     "method": "sim",
+     "supported": true,
+     "note": "",
+     "requires": []
+    },
+    {
+     "lock_state": "unlocked",
+     "method": "screenshot",
+     "supported": true,
+     "note": "",
+     "requires": []
+    },
+    {
+     "lock_state": "afu",
+     "method": "sim",
+     "supported": true,
+     "note": "",
+     "requires": []
+    },
+    {
+     "lock_state": "afu",
+     "method": "screenshot",
+     "supported": true,
+     "note": "",
+     "requires": []
+    },
+    {
+     "lock_state": "bfu",
+     "method": "sim",
+     "supported": true,
+     "note": "",
+     "requires": []
+    },
+    {
+     "lock_state": "bfu",
+     "method": "screenshot",
+     "supported": true,
+     "note": "",
+     "requires": []
+    },
+    {
+     "lock_state": "locked",
+     "method": "sim",
+     "supported": true,
+     "note": "",
+     "requires": []
+    },
+    {
+     "lock_state": "locked",
+     "method": "screenshot",
+     "supported": true,
+     "note": "",
+     "requires": []
+    },
+    {
+     "lock_state": "unlocked",
+     "method": "logical",
+     "supported": true,
+     "note": "Requires USB debugging enabled and the workstation key authorised.",
+     "requires": []
+    },
+    {
+     "lock_state": "unlocked",
+     "method": "backup",
+     "supported": true,
+     "note": "adb backup is deprecated from Android 12 and many apps opt out.",
+     "requires": []
+    },
+    {
+     "lock_state": "unlocked",
+     "method": "filesystem",
+     "supported": true,
+     "note": "Full /data access requires root or a vendor service exploit.",
+     "requires": []
+    },
+    {
+     "lock_state": "unlocked",
+     "method": "cloud",
+     "supported": true,
+     "note": "Requires separate legal authority.",
+     "requires": []
+    },
+    {
+     "lock_state": "afu",
+     "method": "logical",
+     "supported": true,
+     "note": "",
+     "requires": []
+    },
+    {
+     "lock_state": "afu",
+     "method": "backup",
+     "supported": true,
+     "note": "",
+     "requires": []
+    },
+    {
+     "lock_state": "unlocked",
+     "method": "physical",
+     "supported": true,
+     "note": "BootROM DA (Kamakiri-class) yields an image at any lock state, but file-based encryption keeps user data wrapped until first unlock, so a BFU image carries little content.",
+     "requires": []
+    },
+    {
+     "lock_state": "afu",
+     "method": "physical",
+     "supported": true,
+     "note": "BootROM DA (Kamakiri-class) yields an image at any lock state, but file-based encryption keeps user data wrapped until first unlock, so a BFU image carries little content.",
+     "requires": []
+    },
+    {
+     "lock_state": "bfu",
+     "method": "physical",
+     "supported": true,
+     "note": "BootROM DA (Kamakiri-class) yields an image at any lock state, but file-based encryption keeps user data wrapped until first unlock, so a BFU image carries little content.",
+     "requires": []
+    },
+    {
+     "lock_state": "locked",
+     "method": "physical",
+     "supported": true,
+     "note": "BootROM DA (Kamakiri-class) yields an image at any lock state, but file-based encryption keeps user data wrapped until first unlock, so a BFU image carries little content.",
+     "requires": []
+    }
+   ],
+   "notes": ""
+  },
+  {
+   "make": "Vivo",
+   "model": "Y16",
+   "aliases": [
+    "V2204"
+   ],
+   "os_family": "Android",
+   "os_versions": "12 - 13",
+   "chipset": "MediaTek Helio P35",
+   "codename": "",
+   "released": "2022-05",
+   "connector": "Micro-USB",
+   "capabilities": [
+    {
+     "lock_state": "unlocked",
+     "method": "sim",
+     "supported": true,
+     "note": "",
+     "requires": []
+    },
+    {
+     "lock_state": "unlocked",
+     "method": "screenshot",
+     "supported": true,
+     "note": "",
+     "requires": []
+    },
+    {
+     "lock_state": "afu",
+     "method": "sim",
+     "supported": true,
+     "note": "",
+     "requires": []
+    },
+    {
+     "lock_state": "afu",
+     "method": "screenshot",
+     "supported": true,
+     "note": "",
+     "requires": []
+    },
+    {
+     "lock_state": "bfu",
+     "method": "sim",
+     "supported": true,
+     "note": "",
+     "requires": []
+    },
+    {
+     "lock_state": "bfu",
+     "method": "screenshot",
+     "supported": true,
+     "note": "",
+     "requires": []
+    },
+    {
+     "lock_state": "locked",
+     "method": "sim",
+     "supported": true,
+     "note": "",
+     "requires": []
+    },
+    {
+     "lock_state": "locked",
+     "method": "screenshot",
+     "supported": true,
+     "note": "",
+     "requires": []
+    },
+    {
+     "lock_state": "unlocked",
+     "method": "logical",
+     "supported": true,
+     "note": "Requires USB debugging enabled and the workstation key authorised.",
+     "requires": []
+    },
+    {
+     "lock_state": "unlocked",
+     "method": "backup",
+     "supported": true,
+     "note": "adb backup is deprecated from Android 12 and many apps opt out.",
+     "requires": []
+    },
+    {
+     "lock_state": "unlocked",
+     "method": "filesystem",
+     "supported": true,
+     "note": "Full /data access requires root or a vendor service exploit.",
+     "requires": []
+    },
+    {
+     "lock_state": "unlocked",
+     "method": "cloud",
+     "supported": true,
+     "note": "Requires separate legal authority.",
+     "requires": []
+    },
+    {
+     "lock_state": "afu",
+     "method": "logical",
+     "supported": true,
+     "note": "",
+     "requires": []
+    },
+    {
+     "lock_state": "afu",
+     "method": "backup",
+     "supported": true,
+     "note": "",
+     "requires": []
+    },
+    {
+     "lock_state": "unlocked",
+     "method": "physical",
+     "supported": true,
+     "note": "BootROM DA (Kamakiri-class) yields an image at any lock state, but file-based encryption keeps user data wrapped until first unlock, so a BFU image carries little content.",
+     "requires": []
+    },
+    {
+     "lock_state": "afu",
+     "method": "physical",
+     "supported": true,
+     "note": "BootROM DA (Kamakiri-class) yields an image at any lock state, but file-based encryption keeps user data wrapped until first unlock, so a BFU image carries little content.",
+     "requires": []
+    },
+    {
+     "lock_state": "bfu",
+     "method": "physical",
+     "supported": true,
+     "note": "BootROM DA (Kamakiri-class) yields an image at any lock state, but file-based encryption keeps user data wrapped until first unlock, so a BFU image carries little content.",
+     "requires": []
+    },
+    {
+     "lock_state": "locked",
+     "method": "physical",
+     "supported": true,
+     "note": "BootROM DA (Kamakiri-class) yields an image at any lock state, but file-based encryption keeps user data wrapped until first unlock, so a BFU image carries little content.",
+     "requires": []
+    }
+   ],
+   "notes": ""
+  },
+  {
+   "make": "Vivo",
+   "model": "Y22",
+   "aliases": [
+    "V2207"
+   ],
+   "os_family": "Android",
+   "os_versions": "12 - 13",
+   "chipset": "MediaTek Helio G70",
+   "codename": "",
+   "released": "2022-09",
+   "connector": "USB-C",
+   "capabilities": [
+    {
+     "lock_state": "unlocked",
+     "method": "sim",
+     "supported": true,
+     "note": "",
+     "requires": []
+    },
+    {
+     "lock_state": "unlocked",
+     "method": "screenshot",
+     "supported": true,
+     "note": "",
+     "requires": []
+    },
+    {
+     "lock_state": "afu",
+     "method": "sim",
+     "supported": true,
+     "note": "",
+     "requires": []
+    },
+    {
+     "lock_state": "afu",
+     "method": "screenshot",
+     "supported": true,
+     "note": "",
+     "requires": []
+    },
+    {
+     "lock_state": "bfu",
+     "method": "sim",
+     "supported": true,
+     "note": "",
+     "requires": []
+    },
+    {
+     "lock_state": "bfu",
+     "method": "screenshot",
+     "supported": true,
+     "note": "",
+     "requires": []
+    },
+    {
+     "lock_state": "locked",
+     "method": "sim",
+     "supported": true,
+     "note": "",
+     "requires": []
+    },
+    {
+     "lock_state": "locked",
+     "method": "screenshot",
+     "supported": true,
+     "note": "",
+     "requires": []
+    },
+    {
+     "lock_state": "unlocked",
+     "method": "logical",
+     "supported": true,
+     "note": "Requires USB debugging enabled and the workstation key authorised.",
+     "requires": []
+    },
+    {
+     "lock_state": "unlocked",
+     "method": "backup",
+     "supported": true,
+     "note": "adb backup is deprecated from Android 12 and many apps opt out.",
+     "requires": []
+    },
+    {
+     "lock_state": "unlocked",
+     "method": "filesystem",
+     "supported": true,
+     "note": "Full /data access requires root or a vendor service exploit.",
+     "requires": []
+    },
+    {
+     "lock_state": "unlocked",
+     "method": "cloud",
+     "supported": true,
+     "note": "Requires separate legal authority.",
+     "requires": []
+    },
+    {
+     "lock_state": "afu",
+     "method": "logical",
+     "supported": true,
+     "note": "",
+     "requires": []
+    },
+    {
+     "lock_state": "afu",
+     "method": "backup",
+     "supported": true,
+     "note": "",
+     "requires": []
+    },
+    {
+     "lock_state": "unlocked",
+     "method": "physical",
+     "supported": true,
+     "note": "BootROM DA (Kamakiri-class) yields an image at any lock state, but file-based encryption keeps user data wrapped until first unlock, so a BFU image carries little content.",
+     "requires": []
+    },
+    {
+     "lock_state": "afu",
+     "method": "physical",
+     "supported": true,
+     "note": "BootROM DA (Kamakiri-class) yields an image at any lock state, but file-based encryption keeps user data wrapped until first unlock, so a BFU image carries little content.",
+     "requires": []
+    },
+    {
+     "lock_state": "bfu",
+     "method": "physical",
+     "supported": true,
+     "note": "BootROM DA (Kamakiri-class) yields an image at any lock state, but file-based encryption keeps user data wrapped until first unlock, so a BFU image carries little content.",
+     "requires": []
+    },
+    {
+     "lock_state": "locked",
+     "method": "physical",
+     "supported": true,
+     "note": "BootROM DA (Kamakiri-class) yields an image at any lock state, but file-based encryption keeps user data wrapped until first unlock, so a BFU image carries little content.",
+     "requires": []
+    }
+   ],
+   "notes": ""
+  },
+  {
+   "make": "Vivo",
+   "model": "Y27",
+   "aliases": [
+    "V2248"
+   ],
+   "os_family": "Android",
+   "os_versions": "13 - 14",
+   "chipset": "MediaTek Helio G85",
+   "codename": "",
+   "released": "2023-07",
+   "connector": "USB-C",
    "capabilities": [
     {
      "lock_state": "unlocked",
@@ -9912,6 +11310,148 @@
      "method": "physical",
      "supported": true,
      "note": "BootROM DA (Kamakiri-class) yields an image at any lock state, but file-based encryption keeps user data wrapped until first unlock, so a BFU image carries little content.",
+     "requires": []
+    }
+   ],
+   "notes": ""
+  },
+  {
+   "make": "Realme",
+   "model": "C53",
+   "aliases": [
+    "RMX3760"
+   ],
+   "os_family": "Android",
+   "os_versions": "13 - 14",
+   "chipset": "Unisoc T612",
+   "codename": "",
+   "released": "2023-05",
+   "connector": "USB-C",
+   "capabilities": [
+    {
+     "lock_state": "unlocked",
+     "method": "sim",
+     "supported": true,
+     "note": "",
+     "requires": []
+    },
+    {
+     "lock_state": "unlocked",
+     "method": "screenshot",
+     "supported": true,
+     "note": "",
+     "requires": []
+    },
+    {
+     "lock_state": "afu",
+     "method": "sim",
+     "supported": true,
+     "note": "",
+     "requires": []
+    },
+    {
+     "lock_state": "afu",
+     "method": "screenshot",
+     "supported": true,
+     "note": "",
+     "requires": []
+    },
+    {
+     "lock_state": "bfu",
+     "method": "sim",
+     "supported": true,
+     "note": "",
+     "requires": []
+    },
+    {
+     "lock_state": "bfu",
+     "method": "screenshot",
+     "supported": true,
+     "note": "",
+     "requires": []
+    },
+    {
+     "lock_state": "locked",
+     "method": "sim",
+     "supported": true,
+     "note": "",
+     "requires": []
+    },
+    {
+     "lock_state": "locked",
+     "method": "screenshot",
+     "supported": true,
+     "note": "",
+     "requires": []
+    },
+    {
+     "lock_state": "unlocked",
+     "method": "logical",
+     "supported": true,
+     "note": "Requires USB debugging enabled and the workstation key authorised.",
+     "requires": []
+    },
+    {
+     "lock_state": "unlocked",
+     "method": "backup",
+     "supported": true,
+     "note": "adb backup is deprecated from Android 12 and many apps opt out.",
+     "requires": []
+    },
+    {
+     "lock_state": "unlocked",
+     "method": "filesystem",
+     "supported": true,
+     "note": "Full /data access requires root or a vendor service exploit.",
+     "requires": []
+    },
+    {
+     "lock_state": "unlocked",
+     "method": "cloud",
+     "supported": true,
+     "note": "Requires separate legal authority.",
+     "requires": []
+    },
+    {
+     "lock_state": "afu",
+     "method": "logical",
+     "supported": true,
+     "note": "",
+     "requires": []
+    },
+    {
+     "lock_state": "afu",
+     "method": "backup",
+     "supported": true,
+     "note": "",
+     "requires": []
+    },
+    {
+     "lock_state": "unlocked",
+     "method": "physical",
+     "supported": true,
+     "note": "SPRD boot ROM diagnostic mode yields an image at any lock state, but file-based encryption keeps user data wrapped until first unlock, so a BFU image carries little content.",
+     "requires": []
+    },
+    {
+     "lock_state": "afu",
+     "method": "physical",
+     "supported": true,
+     "note": "SPRD boot ROM diagnostic mode yields an image at any lock state, but file-based encryption keeps user data wrapped until first unlock, so a BFU image carries little content.",
+     "requires": []
+    },
+    {
+     "lock_state": "bfu",
+     "method": "physical",
+     "supported": true,
+     "note": "SPRD boot ROM diagnostic mode yields an image at any lock state, but file-based encryption keeps user data wrapped until first unlock, so a BFU image carries little content.",
+     "requires": []
+    },
+    {
+     "lock_state": "locked",
+     "method": "physical",
+     "supported": true,
+     "note": "SPRD boot ROM diagnostic mode yields an image at any lock state, but file-based encryption keeps user data wrapped until first unlock, so a BFU image carries little content.",
      "requires": []
     }
    ],
@@ -13570,6 +15110,290 @@
   },
   {
    "make": "Tecno",
+   "model": "Spark 20",
+   "aliases": [
+    "KJ5"
+   ],
+   "os_family": "Android",
+   "os_versions": "13 - 14",
+   "chipset": "MediaTek Helio G85",
+   "codename": "",
+   "released": "2023-12",
+   "connector": "USB-C",
+   "capabilities": [
+    {
+     "lock_state": "unlocked",
+     "method": "sim",
+     "supported": true,
+     "note": "",
+     "requires": []
+    },
+    {
+     "lock_state": "unlocked",
+     "method": "screenshot",
+     "supported": true,
+     "note": "",
+     "requires": []
+    },
+    {
+     "lock_state": "afu",
+     "method": "sim",
+     "supported": true,
+     "note": "",
+     "requires": []
+    },
+    {
+     "lock_state": "afu",
+     "method": "screenshot",
+     "supported": true,
+     "note": "",
+     "requires": []
+    },
+    {
+     "lock_state": "bfu",
+     "method": "sim",
+     "supported": true,
+     "note": "",
+     "requires": []
+    },
+    {
+     "lock_state": "bfu",
+     "method": "screenshot",
+     "supported": true,
+     "note": "",
+     "requires": []
+    },
+    {
+     "lock_state": "locked",
+     "method": "sim",
+     "supported": true,
+     "note": "",
+     "requires": []
+    },
+    {
+     "lock_state": "locked",
+     "method": "screenshot",
+     "supported": true,
+     "note": "",
+     "requires": []
+    },
+    {
+     "lock_state": "unlocked",
+     "method": "logical",
+     "supported": true,
+     "note": "Requires USB debugging enabled and the workstation key authorised.",
+     "requires": []
+    },
+    {
+     "lock_state": "unlocked",
+     "method": "backup",
+     "supported": true,
+     "note": "adb backup is deprecated from Android 12 and many apps opt out.",
+     "requires": []
+    },
+    {
+     "lock_state": "unlocked",
+     "method": "filesystem",
+     "supported": true,
+     "note": "Full /data access requires root or a vendor service exploit.",
+     "requires": []
+    },
+    {
+     "lock_state": "unlocked",
+     "method": "cloud",
+     "supported": true,
+     "note": "Requires separate legal authority.",
+     "requires": []
+    },
+    {
+     "lock_state": "afu",
+     "method": "logical",
+     "supported": true,
+     "note": "",
+     "requires": []
+    },
+    {
+     "lock_state": "afu",
+     "method": "backup",
+     "supported": true,
+     "note": "",
+     "requires": []
+    },
+    {
+     "lock_state": "unlocked",
+     "method": "physical",
+     "supported": true,
+     "note": "BootROM DA (Kamakiri-class) yields an image at any lock state, but file-based encryption keeps user data wrapped until first unlock, so a BFU image carries little content.",
+     "requires": []
+    },
+    {
+     "lock_state": "afu",
+     "method": "physical",
+     "supported": true,
+     "note": "BootROM DA (Kamakiri-class) yields an image at any lock state, but file-based encryption keeps user data wrapped until first unlock, so a BFU image carries little content.",
+     "requires": []
+    },
+    {
+     "lock_state": "bfu",
+     "method": "physical",
+     "supported": true,
+     "note": "BootROM DA (Kamakiri-class) yields an image at any lock state, but file-based encryption keeps user data wrapped until first unlock, so a BFU image carries little content.",
+     "requires": []
+    },
+    {
+     "lock_state": "locked",
+     "method": "physical",
+     "supported": true,
+     "note": "BootROM DA (Kamakiri-class) yields an image at any lock state, but file-based encryption keeps user data wrapped until first unlock, so a BFU image carries little content.",
+     "requires": []
+    }
+   ],
+   "notes": ""
+  },
+  {
+   "make": "Tecno",
+   "model": "Pop 8",
+   "aliases": [
+    "BG6"
+   ],
+   "os_family": "Android",
+   "os_versions": "13",
+   "chipset": "Unisoc T606",
+   "codename": "",
+   "released": "2023-09",
+   "connector": "USB-C",
+   "capabilities": [
+    {
+     "lock_state": "unlocked",
+     "method": "sim",
+     "supported": true,
+     "note": "",
+     "requires": []
+    },
+    {
+     "lock_state": "unlocked",
+     "method": "screenshot",
+     "supported": true,
+     "note": "",
+     "requires": []
+    },
+    {
+     "lock_state": "afu",
+     "method": "sim",
+     "supported": true,
+     "note": "",
+     "requires": []
+    },
+    {
+     "lock_state": "afu",
+     "method": "screenshot",
+     "supported": true,
+     "note": "",
+     "requires": []
+    },
+    {
+     "lock_state": "bfu",
+     "method": "sim",
+     "supported": true,
+     "note": "",
+     "requires": []
+    },
+    {
+     "lock_state": "bfu",
+     "method": "screenshot",
+     "supported": true,
+     "note": "",
+     "requires": []
+    },
+    {
+     "lock_state": "locked",
+     "method": "sim",
+     "supported": true,
+     "note": "",
+     "requires": []
+    },
+    {
+     "lock_state": "locked",
+     "method": "screenshot",
+     "supported": true,
+     "note": "",
+     "requires": []
+    },
+    {
+     "lock_state": "unlocked",
+     "method": "logical",
+     "supported": true,
+     "note": "Requires USB debugging enabled and the workstation key authorised.",
+     "requires": []
+    },
+    {
+     "lock_state": "unlocked",
+     "method": "backup",
+     "supported": true,
+     "note": "adb backup is deprecated from Android 12 and many apps opt out.",
+     "requires": []
+    },
+    {
+     "lock_state": "unlocked",
+     "method": "filesystem",
+     "supported": true,
+     "note": "Full /data access requires root or a vendor service exploit.",
+     "requires": []
+    },
+    {
+     "lock_state": "unlocked",
+     "method": "cloud",
+     "supported": true,
+     "note": "Requires separate legal authority.",
+     "requires": []
+    },
+    {
+     "lock_state": "afu",
+     "method": "logical",
+     "supported": true,
+     "note": "",
+     "requires": []
+    },
+    {
+     "lock_state": "afu",
+     "method": "backup",
+     "supported": true,
+     "note": "",
+     "requires": []
+    },
+    {
+     "lock_state": "unlocked",
+     "method": "physical",
+     "supported": true,
+     "note": "SPRD boot ROM diagnostic mode yields an image at any lock state, but file-based encryption keeps user data wrapped until first unlock, so a BFU image carries little content.",
+     "requires": []
+    },
+    {
+     "lock_state": "afu",
+     "method": "physical",
+     "supported": true,
+     "note": "SPRD boot ROM diagnostic mode yields an image at any lock state, but file-based encryption keeps user data wrapped until first unlock, so a BFU image carries little content.",
+     "requires": []
+    },
+    {
+     "lock_state": "bfu",
+     "method": "physical",
+     "supported": true,
+     "note": "SPRD boot ROM diagnostic mode yields an image at any lock state, but file-based encryption keeps user data wrapped until first unlock, so a BFU image carries little content.",
+     "requires": []
+    },
+    {
+     "lock_state": "locked",
+     "method": "physical",
+     "supported": true,
+     "note": "SPRD boot ROM diagnostic mode yields an image at any lock state, but file-based encryption keeps user data wrapped until first unlock, so a BFU image carries little content.",
+     "requires": []
+    }
+   ],
+   "notes": ""
+  },
+  {
+   "make": "Tecno",
    "model": "Camon 20",
    "aliases": [
     "CK6n"
@@ -13854,6 +15678,290 @@
   },
   {
    "make": "Infinix",
+   "model": "Hot 40",
+   "aliases": [
+    "X6837"
+   ],
+   "os_family": "Android",
+   "os_versions": "13 - 14",
+   "chipset": "MediaTek Helio G99",
+   "codename": "",
+   "released": "2023-10",
+   "connector": "USB-C",
+   "capabilities": [
+    {
+     "lock_state": "unlocked",
+     "method": "sim",
+     "supported": true,
+     "note": "",
+     "requires": []
+    },
+    {
+     "lock_state": "unlocked",
+     "method": "screenshot",
+     "supported": true,
+     "note": "",
+     "requires": []
+    },
+    {
+     "lock_state": "afu",
+     "method": "sim",
+     "supported": true,
+     "note": "",
+     "requires": []
+    },
+    {
+     "lock_state": "afu",
+     "method": "screenshot",
+     "supported": true,
+     "note": "",
+     "requires": []
+    },
+    {
+     "lock_state": "bfu",
+     "method": "sim",
+     "supported": true,
+     "note": "",
+     "requires": []
+    },
+    {
+     "lock_state": "bfu",
+     "method": "screenshot",
+     "supported": true,
+     "note": "",
+     "requires": []
+    },
+    {
+     "lock_state": "locked",
+     "method": "sim",
+     "supported": true,
+     "note": "",
+     "requires": []
+    },
+    {
+     "lock_state": "locked",
+     "method": "screenshot",
+     "supported": true,
+     "note": "",
+     "requires": []
+    },
+    {
+     "lock_state": "unlocked",
+     "method": "logical",
+     "supported": true,
+     "note": "Requires USB debugging enabled and the workstation key authorised.",
+     "requires": []
+    },
+    {
+     "lock_state": "unlocked",
+     "method": "backup",
+     "supported": true,
+     "note": "adb backup is deprecated from Android 12 and many apps opt out.",
+     "requires": []
+    },
+    {
+     "lock_state": "unlocked",
+     "method": "filesystem",
+     "supported": true,
+     "note": "Full /data access requires root or a vendor service exploit.",
+     "requires": []
+    },
+    {
+     "lock_state": "unlocked",
+     "method": "cloud",
+     "supported": true,
+     "note": "Requires separate legal authority.",
+     "requires": []
+    },
+    {
+     "lock_state": "afu",
+     "method": "logical",
+     "supported": true,
+     "note": "",
+     "requires": []
+    },
+    {
+     "lock_state": "afu",
+     "method": "backup",
+     "supported": true,
+     "note": "",
+     "requires": []
+    },
+    {
+     "lock_state": "unlocked",
+     "method": "physical",
+     "supported": true,
+     "note": "BootROM DA (Kamakiri-class) yields an image at any lock state, but file-based encryption keeps user data wrapped until first unlock, so a BFU image carries little content.",
+     "requires": []
+    },
+    {
+     "lock_state": "afu",
+     "method": "physical",
+     "supported": true,
+     "note": "BootROM DA (Kamakiri-class) yields an image at any lock state, but file-based encryption keeps user data wrapped until first unlock, so a BFU image carries little content.",
+     "requires": []
+    },
+    {
+     "lock_state": "bfu",
+     "method": "physical",
+     "supported": true,
+     "note": "BootROM DA (Kamakiri-class) yields an image at any lock state, but file-based encryption keeps user data wrapped until first unlock, so a BFU image carries little content.",
+     "requires": []
+    },
+    {
+     "lock_state": "locked",
+     "method": "physical",
+     "supported": true,
+     "note": "BootROM DA (Kamakiri-class) yields an image at any lock state, but file-based encryption keeps user data wrapped until first unlock, so a BFU image carries little content.",
+     "requires": []
+    }
+   ],
+   "notes": ""
+  },
+  {
+   "make": "Infinix",
+   "model": "Smart 8",
+   "aliases": [
+    "X6525"
+   ],
+   "os_family": "Android",
+   "os_versions": "13",
+   "chipset": "Unisoc T606",
+   "codename": "",
+   "released": "2023-09",
+   "connector": "USB-C",
+   "capabilities": [
+    {
+     "lock_state": "unlocked",
+     "method": "sim",
+     "supported": true,
+     "note": "",
+     "requires": []
+    },
+    {
+     "lock_state": "unlocked",
+     "method": "screenshot",
+     "supported": true,
+     "note": "",
+     "requires": []
+    },
+    {
+     "lock_state": "afu",
+     "method": "sim",
+     "supported": true,
+     "note": "",
+     "requires": []
+    },
+    {
+     "lock_state": "afu",
+     "method": "screenshot",
+     "supported": true,
+     "note": "",
+     "requires": []
+    },
+    {
+     "lock_state": "bfu",
+     "method": "sim",
+     "supported": true,
+     "note": "",
+     "requires": []
+    },
+    {
+     "lock_state": "bfu",
+     "method": "screenshot",
+     "supported": true,
+     "note": "",
+     "requires": []
+    },
+    {
+     "lock_state": "locked",
+     "method": "sim",
+     "supported": true,
+     "note": "",
+     "requires": []
+    },
+    {
+     "lock_state": "locked",
+     "method": "screenshot",
+     "supported": true,
+     "note": "",
+     "requires": []
+    },
+    {
+     "lock_state": "unlocked",
+     "method": "logical",
+     "supported": true,
+     "note": "Requires USB debugging enabled and the workstation key authorised.",
+     "requires": []
+    },
+    {
+     "lock_state": "unlocked",
+     "method": "backup",
+     "supported": true,
+     "note": "adb backup is deprecated from Android 12 and many apps opt out.",
+     "requires": []
+    },
+    {
+     "lock_state": "unlocked",
+     "method": "filesystem",
+     "supported": true,
+     "note": "Full /data access requires root or a vendor service exploit.",
+     "requires": []
+    },
+    {
+     "lock_state": "unlocked",
+     "method": "cloud",
+     "supported": true,
+     "note": "Requires separate legal authority.",
+     "requires": []
+    },
+    {
+     "lock_state": "afu",
+     "method": "logical",
+     "supported": true,
+     "note": "",
+     "requires": []
+    },
+    {
+     "lock_state": "afu",
+     "method": "backup",
+     "supported": true,
+     "note": "",
+     "requires": []
+    },
+    {
+     "lock_state": "unlocked",
+     "method": "physical",
+     "supported": true,
+     "note": "SPRD boot ROM diagnostic mode yields an image at any lock state, but file-based encryption keeps user data wrapped until first unlock, so a BFU image carries little content.",
+     "requires": []
+    },
+    {
+     "lock_state": "afu",
+     "method": "physical",
+     "supported": true,
+     "note": "SPRD boot ROM diagnostic mode yields an image at any lock state, but file-based encryption keeps user data wrapped until first unlock, so a BFU image carries little content.",
+     "requires": []
+    },
+    {
+     "lock_state": "bfu",
+     "method": "physical",
+     "supported": true,
+     "note": "SPRD boot ROM diagnostic mode yields an image at any lock state, but file-based encryption keeps user data wrapped until first unlock, so a BFU image carries little content.",
+     "requires": []
+    },
+    {
+     "lock_state": "locked",
+     "method": "physical",
+     "supported": true,
+     "note": "SPRD boot ROM diagnostic mode yields an image at any lock state, but file-based encryption keeps user data wrapped until first unlock, so a BFU image carries little content.",
+     "requires": []
+    }
+   ],
+   "notes": ""
+  },
+  {
+   "make": "Infinix",
    "model": "Note 30",
    "aliases": [
     "X6833B"
@@ -14006,6 +16114,148 @@
    "codename": "",
    "released": "2023-06",
    "connector": "Micro-USB",
+   "capabilities": [
+    {
+     "lock_state": "unlocked",
+     "method": "sim",
+     "supported": true,
+     "note": "",
+     "requires": []
+    },
+    {
+     "lock_state": "unlocked",
+     "method": "screenshot",
+     "supported": true,
+     "note": "",
+     "requires": []
+    },
+    {
+     "lock_state": "afu",
+     "method": "sim",
+     "supported": true,
+     "note": "",
+     "requires": []
+    },
+    {
+     "lock_state": "afu",
+     "method": "screenshot",
+     "supported": true,
+     "note": "",
+     "requires": []
+    },
+    {
+     "lock_state": "bfu",
+     "method": "sim",
+     "supported": true,
+     "note": "",
+     "requires": []
+    },
+    {
+     "lock_state": "bfu",
+     "method": "screenshot",
+     "supported": true,
+     "note": "",
+     "requires": []
+    },
+    {
+     "lock_state": "locked",
+     "method": "sim",
+     "supported": true,
+     "note": "",
+     "requires": []
+    },
+    {
+     "lock_state": "locked",
+     "method": "screenshot",
+     "supported": true,
+     "note": "",
+     "requires": []
+    },
+    {
+     "lock_state": "unlocked",
+     "method": "logical",
+     "supported": true,
+     "note": "Requires USB debugging enabled and the workstation key authorised.",
+     "requires": []
+    },
+    {
+     "lock_state": "unlocked",
+     "method": "backup",
+     "supported": true,
+     "note": "adb backup is deprecated from Android 12 and many apps opt out.",
+     "requires": []
+    },
+    {
+     "lock_state": "unlocked",
+     "method": "filesystem",
+     "supported": true,
+     "note": "Full /data access requires root or a vendor service exploit.",
+     "requires": []
+    },
+    {
+     "lock_state": "unlocked",
+     "method": "cloud",
+     "supported": true,
+     "note": "Requires separate legal authority.",
+     "requires": []
+    },
+    {
+     "lock_state": "afu",
+     "method": "logical",
+     "supported": true,
+     "note": "",
+     "requires": []
+    },
+    {
+     "lock_state": "afu",
+     "method": "backup",
+     "supported": true,
+     "note": "",
+     "requires": []
+    },
+    {
+     "lock_state": "unlocked",
+     "method": "physical",
+     "supported": true,
+     "note": "SPRD boot ROM diagnostic mode yields an image at any lock state, but file-based encryption keeps user data wrapped until first unlock, so a BFU image carries little content.",
+     "requires": []
+    },
+    {
+     "lock_state": "afu",
+     "method": "physical",
+     "supported": true,
+     "note": "SPRD boot ROM diagnostic mode yields an image at any lock state, but file-based encryption keeps user data wrapped until first unlock, so a BFU image carries little content.",
+     "requires": []
+    },
+    {
+     "lock_state": "bfu",
+     "method": "physical",
+     "supported": true,
+     "note": "SPRD boot ROM diagnostic mode yields an image at any lock state, but file-based encryption keeps user data wrapped until first unlock, so a BFU image carries little content.",
+     "requires": []
+    },
+    {
+     "lock_state": "locked",
+     "method": "physical",
+     "supported": true,
+     "note": "SPRD boot ROM diagnostic mode yields an image at any lock state, but file-based encryption keeps user data wrapped until first unlock, so a BFU image carries little content.",
+     "requires": []
+    }
+   ],
+   "notes": ""
+  },
+  {
+   "make": "itel",
+   "model": "A70",
+   "aliases": [
+    "A665L"
+   ],
+   "os_family": "Android",
+   "os_versions": "13",
+   "chipset": "Unisoc T606",
+   "codename": "",
+   "released": "2023-10",
+   "connector": "USB-C",
    "capabilities": [
     {
      "lock_state": "unlocked",

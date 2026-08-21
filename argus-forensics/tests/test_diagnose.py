@@ -98,6 +98,8 @@ class VendorGuidance(unittest.TestCase):
         """
         self.assertTrue(vendor_guidance_for("Oppo"))
         self.assertTrue(vendor_guidance_for("xiaomi"))
+        self.assertTrue(vendor_guidance_for("Tecno"))
+        self.assertTrue(vendor_guidance_for("Motorola"))
         self.assertEqual(vendor_guidance_for("Nokia"), [])
 
     def test_every_vendor_has_at_least_one_note(self) -> None:

@@ -29,6 +29,28 @@ class TestAcquisitionSummary(unittest.TestCase):
             self.assertEqual(summary["adb"]["pulled"], 5)
             self.assertEqual(len(summary["comms_providers"]), 2)
 
+    def test_physical_manifest_and_caveats(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            phys_dir = root / "physical"
+            phys_dir.mkdir()
+            manifest = {
+                "rooted": True,
+                "crypto": "file",
+                "bytes": 4096,
+                "carved_files": 3,
+                "dumped": ["userdata", "metadata"],
+                "hashes": {"userdata": "abc123"},
+                "notes": ["FBE ciphertext"],
+            }
+            (phys_dir / "argus-physical-manifest.json").write_text(
+                json.dumps(manifest), encoding="utf-8")
+            summary = build_acquisition_summary(root, method="physical")
+            self.assertEqual(summary["physical"]["dumped"],
+                             ["userdata", "metadata"])
+            self.assertTrue(any("encrypted" in c.lower()
+                                for c in summary["caveats"]))
+
     def test_write_summary_file(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
             root = Path(tmp)

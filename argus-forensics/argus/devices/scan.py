@@ -213,10 +213,11 @@ def _recommend(device: DetectedDevice) -> None:
         return
 
     if has_ready_adb:
-        raw["recommended_method"] = "turbo"
+        raw["recommended_method"] = "comprehensive"
         raw["recommended_action"] = (
-            "USB debugging authorised — Turbo is fastest for live intake. "
-            "Use Comprehensive for full filesystem + verify.")
+            "USB debugging authorised — Comprehensive is the fullest live "
+            "extraction (logical, app DBs, filesystem, APKs). Use Physical "
+            "if the handset has a root shell.")
         raw["scan_tier"] = "full"
         return
 
@@ -230,10 +231,12 @@ def _recommend(device: DetectedDevice) -> None:
         return
 
     if adb_state == "unauthorized":
-        raw["recommended_method"] = ""
+        raw["recommended_method"] = "sim"
         raw["recommended_action"] = (
             "Handset connected but not trusted — unlock screen and accept "
-            "the USB debugging prompt. Tick 'Always allow'.")
+            "the USB debugging prompt. Tick 'Always allow'. If the phone "
+            "is BFU and will not unlock, import a SIM/USIM dump "
+            "(Messages → SIM dump) for card-resident SMS and contacts.")
         meaning, fix = STATE_MEANING.get("unauthorized", ("", ""))
         raw.setdefault("meaning", meaning)
         raw.setdefault("hint", fix)
@@ -249,9 +252,12 @@ def _recommend(device: DetectedDevice) -> None:
         return
 
     if not ready:
-        raw["recommended_method"] = ""
-        raw["recommended_action"] = raw.get("hint") or (
-            "Device visible but not ready for acquisition.")
+        raw["recommended_method"] = "sim"
+        raw["recommended_action"] = (
+            "Handset is not ready for a live extraction. If the case is BFU "
+            "or the phone is destroyed, import a SIM/USIM reader dump "
+            "(Messages → SIM dump). Screenshot documentation remains available "
+            "as photographs imported as evidence.")
         raw["scan_tier"] = "blocked"
         return
 

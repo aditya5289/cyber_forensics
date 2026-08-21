@@ -125,6 +125,28 @@ VENDOR_NOTES: Dict[str, List[str]] = {
         "iQOO is Vivo/Funtouch: enable **USB debugging (Security settings)** "
         "as well as the ordinary USB debugging toggle.",
     ],
+    "tecno": [
+        "HiOS (Tecno): Developer options is unlocked by tapping Build number "
+        "seven times. USB often defaults to charging — switch to File transfer "
+        "from the shade before enabling debugging.",
+        "Many Tecno handsets enumerate as MediaTek VID 0E8D. If adb never "
+        "appears, keep MTP extraction running and import a PhoneClone / HiOS "
+        "backup from shared storage.",
+    ],
+    "infinix": [
+        "XOS (Infinix): same family as Tecno HiOS. Enable USB debugging and "
+        "File transfer. Clone-phone backups land under /sdcard/PhoneClone or "
+        "XOS/Backup — ARGUS pulls those on Comprehensive.",
+    ],
+    "itel": [
+        "itel (Transsion): low-cost Android, often MTP-only until File transfer "
+        "is selected. USB debugging may be labelled USB debugging (Security).",
+    ],
+    "motorola": [
+        "Motorola: USB defaults to charging on many G-series builds. Switch to "
+        "File transfer, then accept the RSA prompt. Moto Backup folders on "
+        "shared storage are pulled when Comprehensive runs.",
+    ],
 }
 
 
@@ -264,6 +286,10 @@ def diagnose(adb: Optional[str] = None) -> Diagnosis:
             "the answer.")
         result.next_steps.append(
             "Then: adb kill-server, replug, adb devices.")
+        result.next_steps.append(
+            "If the handset is BFU, destroyed, or will not authorise: dump "
+            "the SIM/USIM with a reader and import it (argus acquire "
+            "--method sim --source <dump>). ARGUS does not drive the reader.")
         return result
 
     seen_vendors = set()
@@ -276,6 +302,10 @@ def diagnose(adb: Optional[str] = None) -> Diagnosis:
             result.ready.append(label)
         else:
             result.problems.append({"issue": f"{label}: {meaning}", "fix": fix})
+            if state.state in ("unauthorized", "offline"):
+                result.next_steps.append(
+                    "If the phone stays locked (BFU): import a SIM dump for "
+                    "SMS and contacts that never lived on the handset.")
         if state.vendor_hint:
             seen_vendors.add(state.vendor_hint)
 

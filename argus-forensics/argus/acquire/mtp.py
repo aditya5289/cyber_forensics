@@ -1239,6 +1239,46 @@ def devices() -> List[MTPDevice]:
     return found
 
 
+def pick_device(found: List[MTPDevice], *,
+                name: str = "", serial: str = "",
+                hints: Optional[List[str]] = None) -> Optional[MTPDevice]:
+    """Choose the MTP handset that matches the exhibit, not the first on the bus."""
+    if not found:
+        return None
+    tokens: List[str] = []
+    for raw in [name, serial, *(hints or [])]:
+        token = (raw or "").strip().lower()
+        if not token:
+            continue
+        if token not in tokens:
+            tokens.append(token)
+        for part in token.replace("_", " ").replace("-", " ").split():
+            if part not in tokens:
+                tokens.append(part)
+        if len(token) >= 8:
+            prefix = token[:8]
+            if prefix not in tokens:
+                tokens.append(prefix)
+    if not tokens:
+        return found[0]
+    ranked: List[tuple] = []
+    for device in found:
+        blob = f"{device.name} {device.path}".lower()
+        score = 0
+        for token in tokens:
+            if len(token) < 3:
+                continue
+            if token == device.name.lower():
+                score += 50
+            elif token in blob:
+                score += 20
+            elif blob in token:
+                score += 10
+        ranked.append((score, device))
+    ranked.sort(key=lambda item: -item[0])
+    return ranked[0][1] if ranked[0][0] else found[0]
+
+
 def list_volumes(device_name: str) -> List[str]:
     """Top-level storage roots the phone exposes (Internal storage, SD card)."""
     if not available() or not device_name:

@@ -49,7 +49,7 @@
   #brand{grid-area:brand;display:flex;flex-direction:column;justify-content:center;
          gap:1px;padding:0 14px;border-bottom:1px solid var(--line);
          border-right:1px solid var(--line);background:linear-gradient(180deg,#151a21,#12171e)}
-  #brand b{letter-spacing:.16em;font-size:12px}
+  #brand b{letter-spacing:.16em;font-size:12px;color:#d4b45a}
   #brand .prod{color:var(--accent);font-size:9px;letter-spacing:.18em;text-transform:uppercase}
   #brand span{color:var(--ink-faint);font-size:10px}
   #top{grid-area:top;display:flex;align-items:center;gap:10px;padding:0 12px;
@@ -176,6 +176,24 @@
     display:grid;grid-template-columns:1.5fr 1fr auto;gap:18px;align-items:center}
   @media(max-width:1100px){.cmd-hero{grid-template-columns:1fr}}
   .cmd-hero .exh{font:700 28px/1.1 var(--sans);letter-spacing:.02em}
+  .folio{grid-column:1/-1;border:1px solid rgba(201,162,39,.35);
+    background:linear-gradient(165deg,#14120e 0%,#121820 55%,#151a21 100%);
+    padding:20px 22px 18px;border-radius:6px;position:relative}
+  .folio::before{content:"";position:absolute;left:0;top:0;bottom:0;width:3px;
+    background:linear-gradient(#d4b45a,#8a7018)}
+  .folio .mark{font:11px var(--mono);letter-spacing:.2em;text-transform:uppercase;
+    color:#d4b45a}
+  .folio .verdict{font-family:Georgia,"Iowan Old Style","Palatino Linotype",serif;
+    font-size:20px;font-weight:500;line-height:1.4;margin:8px 0 12px;max-width:48rem}
+  .folio p{margin:0 0 8px;color:var(--ink-dim);font-size:13px;line-height:1.65;max-width:52rem}
+  .folio .cols{display:grid;grid-template-columns:1fr 1fr;gap:16px;margin-top:8px}
+  @media(max-width:800px){.folio .cols{grid-template-columns:1fr}}
+  .folio h5{margin:0 0 6px;font-size:10px;letter-spacing:.1em;text-transform:uppercase;
+    color:#d4b45a}
+  .folio ul{margin:0;padding-left:18px;color:var(--ink-dim);font-size:12.5px}
+  .folio .next{margin-top:12px;padding-top:10px;border-top:1px solid var(--line);
+    font-size:13px}
+  .folio .next b{color:var(--ink)}
   .cmd-hero .sub{color:var(--ink-dim);font-size:13px;margin-top:6px}
   .cmd-badges{display:flex;gap:8px;flex-wrap:wrap;margin-top:10px}
   .cmd-badge{font:10px var(--mono);letter-spacing:.06em;text-transform:uppercase;
@@ -652,6 +670,7 @@ async function viewDashboard() {
   MAIN().innerHTML = "";
   const g = el("div", "grid");
   g.appendChild(commandHero(cc, dash));
+  if (dash.folio && dash.folio.verdict) g.appendChild(folioCard(dash.folio));
   g.appendChild(alertRibbon(dash.triage || {}));
   if (dash.comms_quality) g.appendChild(commsQualityCard(dash.comms_quality));
   if ((dash.recommendations || []).length) g.appendChild(nextStepsCard(dash.recommendations));
@@ -820,6 +839,41 @@ function commandHero(cc, dash) {
   return hero;
 }
 
+function folioCard(folio) {
+  const card = el("div", "folio");
+  card.appendChild(el("div", "mark", "Examiner’s folio"));
+  card.appendChild(el("div", "verdict", folio.verdict || ""));
+  (folio.paragraphs || []).slice(1).forEach(p => card.appendChild(el("p", "", p)));
+  const cols = el("div", "cols");
+  if ((folio.strengths || []).length) {
+    const col = el("div");
+    col.appendChild(el("h5", "", "Held"));
+    const ul = el("ul");
+    folio.strengths.forEach(s => ul.appendChild(el("li", "", s)));
+    col.appendChild(ul);
+    cols.appendChild(col);
+  }
+  if ((folio.gaps || []).length) {
+    const col = el("div");
+    col.appendChild(el("h5", "", "Not held / not claimed"));
+    const ul = el("ul");
+    folio.gaps.forEach(s => ul.appendChild(el("li", "", s)));
+    col.appendChild(ul);
+    cols.appendChild(col);
+  }
+  if (cols.childNodes.length) card.appendChild(cols);
+  const nxt = folio.next_action || {};
+  if (nxt.label) {
+    const row = el("div", "next");
+    row.appendChild(el("b", "", "Next — " + nxt.label));
+    if (nxt.reason) {
+      row.appendChild(document.createTextNode("  " + nxt.reason));
+    }
+    card.appendChild(row);
+  }
+  return card;
+}
+
 function extractionProvenanceCard(ext) {
   const card = el("div", "cmd-alerts");
   card.style.gridColumn = "1 / -1";
@@ -842,6 +896,21 @@ function extractionProvenanceCard(ext) {
     mtp.appendChild(el("p", "", ext.mtp_completeness));
     card.appendChild(mtp);
   }
+  const phys = ext.physical || {};
+  if ((phys.dumped || []).length) {
+    const row = el("div", "cmd-alert " + (/file|fbe|encrypt/i.test(phys.crypto || "") ? "warn" : ""));
+    row.appendChild(el("h5", "", "Physical image"));
+    row.appendChild(el("p", "",
+      (phys.dumped || []).join(", ") +
+      (phys.crypto ? " · crypto " + phys.crypto : "") +
+      (phys.carved_files ? " · carved " + phys.carved_files + " file(s)" : "")));
+    card.appendChild(row);
+  }
+  (ext.caveats || []).slice(0, 3).forEach(c => {
+    const row = el("div", "cmd-alert warn");
+    row.appendChild(el("p", "", c));
+    card.appendChild(row);
+  });
   const prep = ext.preprocess_summary || {};
   const wa = prep.whatsapp_decrypt || {};
   if (wa.attempted) {

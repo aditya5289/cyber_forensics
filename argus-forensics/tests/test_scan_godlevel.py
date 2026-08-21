@@ -55,14 +55,29 @@ class TestScanMerge(unittest.TestCase):
         _recommend(dev)
         self.assertEqual(dev.raw["recommended_method"], "mtp")
 
-    def test_recommend_turbo_for_ready_adb(self) -> None:
+    def test_recommend_comprehensive_for_ready_adb(self) -> None:
         dev = DetectedDevice(
             transport="adb", serial="ABC", model="Pixel",
             marketing_name="Pixel", os_family="Android",
             raw={"ready": True, "adb_state": "device"},
         )
         _recommend(dev)
-        self.assertEqual(dev.raw["recommended_method"], "turbo")
+        self.assertEqual(dev.raw["recommended_method"], "comprehensive")
+
+    def test_recommend_sim_when_handset_is_blocked(self) -> None:
+        blocked = self._adb_blocked()
+        _recommend(blocked)
+        self.assertEqual(blocked.raw["recommended_method"], "sim")
+        self.assertIn("SIM", blocked.raw["recommended_action"])
+
+    def test_recommend_sim_when_visible_but_not_ready(self) -> None:
+        dev = DetectedDevice(
+            transport="adb", serial="X", model="Y02",
+            marketing_name="Y02", os_family="Android",
+            raw={"ready": False, "adb_state": "unknown"},
+        )
+        _recommend(dev)
+        self.assertEqual(dev.raw["recommended_method"], "sim")
 
 
 class TestScanDevices(unittest.TestCase):

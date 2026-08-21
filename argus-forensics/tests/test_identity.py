@@ -36,6 +36,9 @@ class TestUsbIdentity(unittest.TestCase):
     def test_vendor_for_y_series_vid(self) -> None:
         self.assertIn("Vivo", vendor_for_vid("2d95"))
 
+    def test_transsion_vid_is_known(self) -> None:
+        self.assertIn("Transsion", vendor_for_vid("1e0e"))
+
     def test_usb_identity_includes_mode(self) -> None:
         ident = usb_identity_from_path(self.PATH)
         self.assertEqual(ident["usb_mode"], "MTP / file transfer")

@@ -270,7 +270,7 @@ def cmd_acquire(args, out: Out) -> int:
                   else [c.strip() for c in args.categories.split(",")])
 
     device = None
-    if args.method != "import":
+    if args.method not in ("import", "sim", "cloud"):
         device = require_device(args.serial)
         out.ok(f"Device: {device.name} ({device.os_family} "
                f"{device.os_version}, serial {device.serial})")
@@ -290,7 +290,8 @@ def cmd_acquire(args, out: Out) -> int:
         owner_name=args.owner_name, notes=args.notes,
         resume=bool(args.resume),
         resume_container=args.resume_container or None,
-        turbo=bool(args.turbo))
+        turbo=bool(args.turbo),
+        physical_full=bool(getattr(args, "physical_full", False)))
 
     def progress(entry):
         level = entry.get("level", "info")
@@ -1485,7 +1486,8 @@ def build_parser() -> argparse.ArgumentParser:
     a.add_argument("--operator", required=True, help="operator name (Step 11)")
     a.add_argument("--method", default="logical",
                    choices=["logical", "filesystem", "backup", "import",
-                            "comprehensive", "mtp", "turbo"])
+                            "comprehensive", "mtp", "turbo", "physical",
+                            "sim", "cloud"])
     a.add_argument("--span", default="all",
                    help="Step 9: all | 24h | 7d | 30d | 365d | FROM..TO")
     a.add_argument("--categories", default="all",
@@ -1496,7 +1498,9 @@ def build_parser() -> argparse.ArgumentParser:
                    choices=["unlocked", "afu", "bfu", "locked"])
     a.add_argument("--serial", default=None)
     a.add_argument("--source", default=None,
-                   help="for --method import: a folder, .ab file or iOS backup")
+                   help="for --method import/sim/cloud: dump, folder, or archive")
+    a.add_argument("--physical-full", action="store_true",
+                   help="physical: also image OS partitions (system/vendor/boot)")
     a.add_argument("--backup-password", default=None)
     a.add_argument("--owner", default="",
                    help="comma-separated identifiers belonging to the device owner")
@@ -1520,7 +1524,7 @@ def build_parser() -> argparse.ArgumentParser:
     ab.add_argument("--operator", required=True, help="operator name")
     ab.add_argument("--method", default="turbo",
                     choices=["logical", "filesystem", "backup",
-                             "comprehensive", "mtp", "turbo"])
+                             "comprehensive", "mtp", "turbo", "physical"])
     ab.add_argument("--all-connected", action="store_true",
                     help="queue every ready handset currently attached")
     ab.add_argument("--plan", default=None,
