@@ -22,6 +22,7 @@ container read-only.  ``verify()`` re-derives that root.
 
 from __future__ import annotations
 
+import concurrent.futures
 import json
 import mimetypes
 import os
@@ -440,18 +441,97 @@ class EvidenceContainer:
         if seal.get("audit_tip") and seal["audit_tip"] != self.audit.tip:
             problems.append("audit: log has grown since the container was sealed")
 
-        blob_hashes: List[str] = []
+        # Collect all blob paths once — avoids re-iterating the filesystem.
+        blob_paths: List[Path] = list(self.iter_blobs())
+        blob_hashes: List[str] = [p.name for p in blob_paths]
         bad_blobs: List[str] = []
-        for p in self.iter_blobs():
-            blob_hashes.append(p.name)
-            if deep:
-                actual = hash_file(p).sha256
-                if actual != p.name:
-                    bad_blobs.append(f"{p.name[:16]}… actual {actual[:16]}…")
+
+        if deep and blob_paths:
+            # Parallel deep hashing — ThreadPool for IO-bound, ProcessPool as
+            # secondary attempt, sequential as final fallback. Guarantees
+            # verification never fails due to executor unavailability.
+            try:
+                max_workers = min(32, (os.cpu_count() or 4) * 2, len(blob_paths))
+                if max_workers > 1 and len(blob_paths) > 1:
+                    # Primary: ThreadPoolExecutor (optimal for file IO, GIL released)
+                    try:
+                        with concurrent.futures.ThreadPoolExecutor(
+                            max_workers=max_workers
+                        ) as executor:
+                            future_to_path = {
+                                executor.submit(hash_file, p): p for p in blob_paths
+                            }
+                            for future in concurrent.futures.as_completed(
+                                future_to_path
+                            ):
+                                p = future_to_path[future]
+                                try:
+                                    actual = future.result().sha256
+                                except Exception as exc:
+                                    bad_blobs.append(
+                                        f"{p.name[:16]}… hash failed: {exc}"
+                                    )
+                                    continue
+                                if actual != p.name:
+                                    bad_blobs.append(
+                                        f"{p.name[:16]}… actual {actual[:16]}…"
+                                    )
+                    except Exception:
+                        # Secondary: ProcessPoolExecutor (CPU-bound fallback)
+                        try:
+                            with concurrent.futures.ProcessPoolExecutor(
+                                max_workers=max_workers
+                            ) as executor:
+                                future_to_path = {
+                                    executor.submit(hash_file, p): p
+                                    for p in blob_paths
+                                }
+                                bad_blobs.clear()
+                                for future in concurrent.futures.as_completed(
+                                    future_to_path
+                                ):
+                                    p = future_to_path[future]
+                                    try:
+                                        actual = future.result().sha256
+                                    except Exception as exc:
+                                        bad_blobs.append(
+                                            f"{p.name[:16]}… hash failed: {exc}"
+                                        )
+                                        continue
+                                    if actual != p.name:
+                                        bad_blobs.append(
+                                            f"{p.name[:16]}… actual {actual[:16]}…"
+                                        )
+                        except Exception:
+                            raise  # trigger outer sequential fallback
+                else:
+                    # Single file or single worker — no parallelism overhead
+                    for p in blob_paths:
+                        actual = hash_file(p).sha256
+                        if actual != p.name:
+                            bad_blobs.append(
+                                f"{p.name[:16]}… actual {actual[:16]}…"
+                            )
+            except Exception:
+                # Ultimate fallback: sequential hashing guarantees correctness
+                bad_blobs.clear()
+                for p in blob_paths:
+                    try:
+                        actual = hash_file(p).sha256
+                    except Exception as exc:
+                        bad_blobs.append(f"{p.name[:16]}… hash failed: {exc}")
+                        continue
+                    if actual != p.name:
+                        bad_blobs.append(f"{p.name[:16]}… actual {actual[:16]}…")
         problems.extend(f"blob content mismatch: {b}" for b in bad_blobs)
 
         if seal.get("blob_merkle_root"):
-            root = merkle_root(blob_hashes)
+            # Sort blob_hashes before merkle_root for deterministic verification
+            # regardless of filesystem iteration order (rglob is not guaranteed
+            # sorted). merkle_root also sorts internally, but explicit sort here
+            # ensures the local list is canonical before comparison.
+            blob_hashes_sorted = sorted(blob_hashes)
+            root = merkle_root(blob_hashes_sorted)
             if root != seal["blob_merkle_root"]:
                 problems.append(
                     f"blob set changed since sealing (root {root[:16]}… != "

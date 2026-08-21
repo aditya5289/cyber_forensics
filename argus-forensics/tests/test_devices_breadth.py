@@ -41,6 +41,7 @@ class CatalogueBreadth(unittest.TestCase):
 
     def test_lookup_by_model_code(self) -> None:
         for code, expected in [("SM-S911B", "Galaxy S23"),
+                               ("SM-A235F", "Galaxy A23"),
                                ("iPhone15,2", "iPhone 14 Pro"),
                                ("RMX3471", "9 Pro"),
                                ("oriole", "Pixel 6")]:

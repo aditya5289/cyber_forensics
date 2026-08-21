@@ -27,6 +27,7 @@ from __future__ import annotations
 import heapq
 import itertools
 import json
+from concurrent.futures import ThreadPoolExecutor
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any, Dict, Iterable, List, Optional, Tuple
@@ -405,11 +406,25 @@ class AnalysisSession:
                 return int(art.timestamp)
             return -1 if reverse else 2**62
 
-        for lc in self.loaded:
-            where, params = self._container_where(lc, compiled)
-            total += lc.db.count(where, params)
-            batches.append([(lc, art) for art in lc.db.iter_artifacts(
-                where, params, order=order, limit=fetch)])
+        if len(self.loaded) > 1:
+            def _fetch(lc: LoadedContainer) -> Tuple[int, List[Tuple[LoadedContainer, Artifact]]]:
+                where, params = self._container_where(lc, compiled)
+                cnt = lc.db.count(where, params)
+                arts = [(lc, art) for art in lc.db.iter_artifacts(
+                    where, params, order=order, limit=fetch)]
+                return cnt, arts
+
+            with ThreadPoolExecutor(max_workers=min(len(self.loaded), 8)) as _ex:
+                results = list(_ex.map(_fetch, self.loaded))
+            for cnt, arts in results:
+                total += cnt
+                batches.append(arts)
+        else:
+            for lc in self.loaded:
+                where, params = self._container_where(lc, compiled)
+                total += lc.db.count(where, params)
+                batches.append([(lc, art) for art in lc.db.iter_artifacts(
+                    where, params, order=order, limit=fetch)])
 
         if not batches:
             window: List[Tuple[LoadedContainer, Artifact]] = []
@@ -633,7 +648,7 @@ class AnalysisSession:
 
     def statistics(self, aql_text: str = "") -> Dict[str, Any]:
         stats = self._fast_statistics(aql_text)
-        if stats.get("total_artifacts", 0) <= 25_000:
+        if stats.get("total_artifacts", 0) <= 500_000:
             compiled = aql.compile_query(aql_text)
             artifacts = []
             for lc in self.loaded:
@@ -985,7 +1000,7 @@ class AnalysisSession:
         folio = compose_folio(
             ov, triage, ov.get("provenance") or {}, self._comms_quality())
         deep_stats: Dict[str, Any] = {}
-        if total and total <= 25_000:
+        if total and total <= 500_000:
             try:
                 full = self.statistics("")
                 deep_stats = {
@@ -1109,6 +1124,13 @@ class AnalysisSession:
         """Clear cached intelligence after re-decode or tagging changes."""
         self._intel_cache = {}
 
+    def _invalidate_caches(self) -> None:
+        """LRU cache invalidation hook for graph/analytics caches."""
+        self._graph_cache.clear()
+        self._analytics_cache.clear()
+        if hasattr(self, "_intel_cache"):
+            self._intel_cache.clear()
+
     def source_tree(self, limit: int = 500) -> Dict[str, Any]:
         """Filesystem / source-path tree — XAMN file-system view analogue."""
         bags: Dict[str, Dict[str, Any]] = {}
@@ -1174,6 +1196,7 @@ class AnalysisSession:
         for lc in self.loaded:
             if lc.db.get(artifact_id):
                 self._sidecar(lc).tag(artifact_id, name, colour, note, actor)
+                self._invalidate_caches()
                 return True
         return False
 
@@ -1181,6 +1204,7 @@ class AnalysisSession:
         for lc in self.loaded:
             if lc.db.get(artifact_id):
                 self._sidecar(lc).untag(artifact_id, name)
+                self._invalidate_caches()
                 return True
         return False
 

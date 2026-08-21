@@ -25,16 +25,23 @@ def _probe_dumpsys(path: Path) -> bool:
         head = path.read_text(encoding="utf-8", errors="replace")[:600].lower()
     except OSError:
         return False
-    return "dumpsys" in path.as_posix() or "last known" in head or "call log" in head
+    return ("dumpsys" in path.as_posix()
+            or "telephony_identity" in path.as_posix()
+            or "last known" in head or "call log" in head
+            or "notificationrecord" in head or "subscriptioninfo" in head)
 
 
 @register(
     name="android.dumpsys_comms",
     patterns=["dumpsys/call_log.txt", "dumpsys/telephony.txt",
-              "dumpsys/telecom.txt", "dumpsys/phone.txt",
+              "dumpsys/telecom.txt", "dumpsys/telecom_dump.txt",
+              "dumpsys/phone.txt",
               "dumpsys/contacts.txt", "dumpsys/location.txt",
               "dumpsys/fused.txt", "dumpsys/notification.txt",
-              "dumpsys/isub.txt"],
+              "dumpsys/isub.txt", "dumpsys/sms.txt", "dumpsys/mms.txt",
+              "dumpsys/iphonesubinfo.txt", "dumpsys/simphonebook.txt",
+              "dumpsys/iccphonebook.txt",
+              "comms/telephony_identity.txt"],
     platform="android",
     priority=85,
     probe=_probe_dumpsys,
@@ -51,13 +58,28 @@ def parse_dumpsys(path: Path, ctx: ParseContext) -> ParseResult:
     name = path.stem.lower()
     if name in ("call_log", "telephony"):
         _parse_calls(text, path, ctx, res)
+        _parse_telecom(text, path, ctx, res)
+    elif name in ("telecom", "telecom_dump", "phone"):
+        _parse_telecom(text, path, ctx, res)
+        _parse_calls(text, path, ctx, res)
     elif name == "contacts":
         _parse_contacts(text, path, ctx, res)
     elif name in ("location", "fused"):
         _parse_location(text, path, ctx, res)
+    elif name == "notification":
+        _parse_notifications(text, path, ctx, res)
+    elif name in ("sms", "mms"):
+        _parse_sms_dump(text, path, ctx, res)
+        _parse_notifications(text, path, ctx, res)
+    elif name in ("isub", "iphonesubinfo", "telephony_identity"):
+        _parse_subscription(text, path, ctx, res)
+    elif name in ("simphonebook", "iccphonebook"):
+        _parse_contacts(text, path, ctx, res)
     else:
         _parse_calls(text, path, ctx, res)
+        _parse_telecom(text, path, ctx, res)
         _parse_location(text, path, ctx, res)
+        _parse_subscription(text, path, ctx, res)
     return res
 
 
@@ -129,5 +151,229 @@ def _parse_location(text: str, path: Path, ctx: ParseContext,
                 "map_url": (f"https://www.openstreetmap.org/?mlat={lat}"
                             f"&mlon={lon}#map=16/{lat}/{lon}"),
             },
+        )
+        res.artifacts.append(art)
+
+
+_MSG_PKGS = (
+    "com.samsung.android.messaging",
+    "com.google.android.apps.messaging",
+    "com.android.mms",
+    "com.android.messaging",
+    "com.google.android.apps.dynamite",
+    "com.whatsapp",
+    "org.telegram.messenger",
+    "com.facebook.orca",
+    "com.instagram.android",
+    "com.android.incallui",
+    "com.samsung.android.incallui",
+    "com.google.android.dialer",
+    "com.samsung.android.dialer",
+    "com.android.dialer",
+)
+
+_MSG_PKG_HINTS = ("messaging", "mms", "sms", "dialer", "incallui", "whatsapp",
+                  "telegram", "signal")
+
+
+def _is_messaging_pkg(pkg: str) -> bool:
+    p = (pkg or "").lower()
+    if p in _MSG_PKGS:
+        return True
+    return any(h in p for h in _MSG_PKG_HINTS)
+
+
+def _extra_field(block: str, key: str) -> str:
+    match = re.search(
+        rf"{re.escape(key)}\s*[=:]\s*(?:String\s+\()?(.*)",
+        block, re.IGNORECASE)
+    if not match:
+        return ""
+    value = match.group(1).strip().strip(")").strip()
+    value = value.split("\n", 1)[0].strip().strip(",")
+    if value.lower() in ("null", "none", "(null)", ""):
+        return ""
+    return value[:2000]
+
+
+def _parse_telecom(text: str, path: Path, ctx: ParseContext,
+                   res: ParseResult) -> None:
+    current: Dict[str, str] = {}
+    seen: set = set()
+
+    def flush() -> None:
+        if not current:
+            return
+        handle = current.get("handle") or current.get("number") or ""
+        number = clean_number(
+            re.sub(r"^(tel:|sip:)", "", handle, flags=re.I).strip())
+        if not number:
+            return
+        ts = guess(current.get("connect") or current.get("create")
+                   or current.get("disconnect"), "date")
+        if ts and not ctx.in_span(ts):
+            return
+        key = (number, ts, current.get("state", ""))
+        if key in seen:
+            return
+        seen.add(key)
+        incoming = (current.get("incoming") or "").lower() in ("true", "1")
+        direction = Direction.INCOMING if incoming else Direction.OUTGOING
+        state = current.get("state") or ""
+        if "miss" in state.lower() or "ringing" in state.lower():
+            direction = Direction.MISSED
+            subtype = "Missed call (telecom)"
+        else:
+            subtype = "Call (telecom)"
+        duration = ""
+        try:
+            c = int(current.get("connect") or 0)
+            d = int(current.get("disconnect") or 0)
+            if c and d and d > c:
+                duration = str(int((d - c) / 1000))
+        except (TypeError, ValueError):
+            pass
+        body = f"{subtype} — {number}"
+        if duration:
+            body += f" ({duration}s)"
+        art = Artifact(
+            category=Category.CALL, subtype=subtype,
+            timestamp=ts, direction=direction, body=body,
+            app="Android Telecom (dumpsys)",
+            source_path=ctx.rel(path),
+            attributes={
+                "state": state,
+                "handle": handle,
+                "duration_seconds": duration,
+            },
+        )
+        art.add_participant(number, "", role="party")
+        res.artifacts.append(art)
+
+    for line in text.splitlines():
+        stripped = line.strip()
+        low = stripped.lower()
+        if low.startswith("call ") or low.startswith("call:"):
+            flush()
+            current = {}
+            continue
+        if low.startswith("handle:"):
+            current["handle"] = stripped.split(":", 1)[-1].strip()
+        elif "connecttimemillis" in low.replace(" ", ""):
+            current["connect"] = stripped.split(":")[-1].strip()
+        elif "createtimemillis" in low.replace(" ", ""):
+            current["create"] = stripped.split(":")[-1].strip()
+        elif "disconnecttimemillis" in low.replace(" ", ""):
+            current["disconnect"] = stripped.split(":")[-1].strip()
+        elif low.startswith("state:"):
+            current["state"] = stripped.split(":", 1)[-1].strip()
+        elif "isincoming" in low.replace(" ", ""):
+            current["incoming"] = stripped.split(":")[-1].strip()
+        elif low.startswith("number=") or low.startswith("number:"):
+            current["number"] = re.split(r"[=:]", stripped, maxsplit=1)[-1].strip()
+    flush()
+
+
+def _parse_notifications(text: str, path: Path, ctx: ParseContext,
+                         res: ParseResult) -> None:
+    seen: set = set()
+    chunks = re.split(r"NotificationRecord", text)
+    for chunk in chunks[1:]:
+        pkg_m = re.search(r"opPkg=(\S+)", chunk)
+        pkg = pkg_m.group(1) if pkg_m else ""
+        if not _is_messaging_pkg(pkg):
+            continue
+        title = _extra_field(chunk, "android.title")
+        body = (_extra_field(chunk, "android.bigText")
+                or _extra_field(chunk, "android.text")
+                or _extra_field(chunk, "android.subText"))
+        if not body and not title:
+            continue
+        when_m = re.search(r"when=(\d{10,13})", chunk)
+        ts = guess(when_m.group(1) if when_m else None, "date")
+        if ts and not ctx.in_span(ts):
+            continue
+        key = (pkg, title, body[:80], ts)
+        if key in seen:
+            continue
+        seen.add(key)
+        phones = _PHONE.findall(title + " " + body)
+        number = clean_number(phones[0]) if phones else ""
+        is_call = "dialer" in pkg or "incallui" in pkg
+        art = Artifact(
+            category=Category.CALL if is_call else Category.MESSAGE,
+            subtype=("Call notification" if is_call
+                     else "SMS / chat notification"),
+            timestamp=ts, direction=Direction.INCOMING,
+            body=body or title,
+            app=pkg or "Android Notification",
+            source_path=ctx.rel(path),
+            attributes={"title": title, "package": pkg},
+        )
+        if number:
+            art.add_participant(number, title, role="party")
+        elif title:
+            art.add_participant("", title, role="party")
+        res.artifacts.append(art)
+
+
+def _parse_sms_dump(text: str, path: Path, ctx: ParseContext,
+                    res: ParseResult) -> None:
+    seen: set = set()
+    for match in re.finditer(
+            r"(?:address|addr|from|originatingAddress)=([+\d][\d\- ]{5,}\d)"
+            r".{0,240}?(?:body|text|msg)=(.+?)(?:,\s*\w+=|$)",
+            text, re.IGNORECASE | re.DOTALL):
+        number = clean_number(match.group(1))
+        body = re.sub(r"\s+", " ", match.group(2)).strip()[:2000]
+        if not number or not body:
+            continue
+        key = (number, body[:80])
+        if key in seen:
+            continue
+        seen.add(key)
+        art = Artifact(
+            category=Category.MESSAGE, subtype="SMS (dumpsys)",
+            direction=Direction.UNKNOWN, body=body,
+            app="Android SMS (dumpsys)",
+            source_path=ctx.rel(path),
+        )
+        art.add_participant(number, "", role="party")
+        res.artifacts.append(art)
+
+
+def _parse_subscription(text: str, path: Path, ctx: ParseContext,
+                        res: ParseResult) -> None:
+    seen: set = set()
+    # SubscriptionInfo dumps and getprop msisdn lines.
+    for match in re.finditer(
+            r"(?:number|msisdn|line1Number|mNumber)\s*[=:]\s*([+\d][\d\- ]{6,}\d)",
+            text, re.IGNORECASE):
+        number = clean_number(match.group(1))
+        if not number or number in seen:
+            continue
+        seen.add(number)
+        art = Artifact(
+            category=Category.DEVICE, subtype="Subscriber number",
+            body=f"MSISDN / line number — {number}",
+            app="Android Telephony",
+            source_path=ctx.rel(path),
+            attributes={"msisdn": number},
+        )
+        art.add_participant(number, "", role="owner")
+        res.artifacts.append(art)
+    for match in re.finditer(
+            r"(?:iccId|iccid|mIccId)\s*[=:]\s*([0-9A-Fa-f]{10,})",
+            text, re.IGNORECASE):
+        iccid = match.group(1).strip()
+        if iccid in seen:
+            continue
+        seen.add(iccid)
+        art = Artifact(
+            category=Category.DEVICE, subtype="SIM ICCID",
+            body=f"ICCID — {iccid}",
+            app="Android Telephony",
+            source_path=ctx.rel(path),
+            attributes={"iccid": iccid},
         )
         res.artifacts.append(art)

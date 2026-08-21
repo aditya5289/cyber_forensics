@@ -5142,6 +5142,241 @@
   },
   {
    "make": "Samsung",
+   "model": "Galaxy A23",
+   "aliases": [
+    "SM-A235F",
+    "SM-A235M",
+    "SM-A235N",
+    "a23"
+   ],
+   "os_family": "Android",
+   "os_versions": "12 - 14",
+   "chipset": "Snapdragon 680",
+   "codename": "a23",
+   "released": "2022-03",
+   "connector": "USB-C",
+   "capabilities": [
+    {
+     "lock_state": "unlocked",
+     "method": "sim",
+     "supported": true,
+     "note": "",
+     "requires": []
+    },
+    {
+     "lock_state": "unlocked",
+     "method": "screenshot",
+     "supported": true,
+     "note": "",
+     "requires": []
+    },
+    {
+     "lock_state": "afu",
+     "method": "sim",
+     "supported": true,
+     "note": "",
+     "requires": []
+    },
+    {
+     "lock_state": "afu",
+     "method": "screenshot",
+     "supported": true,
+     "note": "",
+     "requires": []
+    },
+    {
+     "lock_state": "bfu",
+     "method": "sim",
+     "supported": true,
+     "note": "",
+     "requires": []
+    },
+    {
+     "lock_state": "bfu",
+     "method": "screenshot",
+     "supported": true,
+     "note": "",
+     "requires": []
+    },
+    {
+     "lock_state": "locked",
+     "method": "sim",
+     "supported": true,
+     "note": "",
+     "requires": []
+    },
+    {
+     "lock_state": "locked",
+     "method": "screenshot",
+     "supported": true,
+     "note": "",
+     "requires": []
+    },
+    {
+     "lock_state": "unlocked",
+     "method": "logical",
+     "supported": true,
+     "note": "Requires USB debugging enabled and the workstation key authorised.",
+     "requires": []
+    },
+    {
+     "lock_state": "unlocked",
+     "method": "backup",
+     "supported": true,
+     "note": "adb backup is deprecated from Android 12 and many apps opt out.",
+     "requires": []
+    },
+    {
+     "lock_state": "unlocked",
+     "method": "filesystem",
+     "supported": true,
+     "note": "Full /data access requires root or a vendor service exploit.",
+     "requires": []
+    },
+    {
+     "lock_state": "unlocked",
+     "method": "cloud",
+     "supported": true,
+     "note": "Requires separate legal authority.",
+     "requires": []
+    },
+    {
+     "lock_state": "afu",
+     "method": "logical",
+     "supported": true,
+     "note": "",
+     "requires": []
+    },
+    {
+     "lock_state": "afu",
+     "method": "backup",
+     "supported": true,
+     "note": "",
+     "requires": []
+    }
+   ],
+   "notes": ""
+  },
+  {
+   "make": "Samsung",
+   "model": "Galaxy A23 5G",
+   "aliases": [
+    "SM-A236B",
+    "SM-A233F",
+    "SM-A236E",
+    "SM-A236U",
+    "a23xq"
+   ],
+   "os_family": "Android",
+   "os_versions": "12 - 14",
+   "chipset": "Snapdragon 695",
+   "codename": "a23xq",
+   "released": "2022-03",
+   "connector": "USB-C",
+   "capabilities": [
+    {
+     "lock_state": "unlocked",
+     "method": "sim",
+     "supported": true,
+     "note": "",
+     "requires": []
+    },
+    {
+     "lock_state": "unlocked",
+     "method": "screenshot",
+     "supported": true,
+     "note": "",
+     "requires": []
+    },
+    {
+     "lock_state": "afu",
+     "method": "sim",
+     "supported": true,
+     "note": "",
+     "requires": []
+    },
+    {
+     "lock_state": "afu",
+     "method": "screenshot",
+     "supported": true,
+     "note": "",
+     "requires": []
+    },
+    {
+     "lock_state": "bfu",
+     "method": "sim",
+     "supported": true,
+     "note": "",
+     "requires": []
+    },
+    {
+     "lock_state": "bfu",
+     "method": "screenshot",
+     "supported": true,
+     "note": "",
+     "requires": []
+    },
+    {
+     "lock_state": "locked",
+     "method": "sim",
+     "supported": true,
+     "note": "",
+     "requires": []
+    },
+    {
+     "lock_state": "locked",
+     "method": "screenshot",
+     "supported": true,
+     "note": "",
+     "requires": []
+    },
+    {
+     "lock_state": "unlocked",
+     "method": "logical",
+     "supported": true,
+     "note": "Requires USB debugging enabled and the workstation key authorised.",
+     "requires": []
+    },
+    {
+     "lock_state": "unlocked",
+     "method": "backup",
+     "supported": true,
+     "note": "adb backup is deprecated from Android 12 and many apps opt out.",
+     "requires": []
+    },
+    {
+     "lock_state": "unlocked",
+     "method": "filesystem",
+     "supported": true,
+     "note": "Full /data access requires root or a vendor service exploit.",
+     "requires": []
+    },
+    {
+     "lock_state": "unlocked",
+     "method": "cloud",
+     "supported": true,
+     "note": "Requires separate legal authority.",
+     "requires": []
+    },
+    {
+     "lock_state": "afu",
+     "method": "logical",
+     "supported": true,
+     "note": "",
+     "requires": []
+    },
+    {
+     "lock_state": "afu",
+     "method": "backup",
+     "supported": true,
+     "note": "",
+     "requires": []
+    }
+   ],
+   "notes": ""
+  },
+  {
+   "make": "Samsung",
    "model": "Galaxy A14",
    "aliases": [
     "SM-A145F",

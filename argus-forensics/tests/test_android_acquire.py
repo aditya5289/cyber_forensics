@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import os
 import tempfile
 import unittest
 from pathlib import Path
@@ -62,7 +63,7 @@ class TestAndroidAdbPull(unittest.TestCase):
 
     calls = {"n": 0}
 
-    def fake_once(remote, local, verify=True):
+    def fake_once(remote, local, verify=True, timeout=180):
       calls["n"] += 1
       if calls["n"] < 2:
         return False, "transient"
@@ -76,6 +77,103 @@ class TestAndroidAdbPull(unittest.TestCase):
                                 retries=2)
     self.assertTrue(ok)
     self.assertEqual(calls["n"], 2)
+
+  def test_want_tar_stream_covers_whatsapp_media(self) -> None:
+    self.assertTrue(
+        android_adb._want_tar_stream("/sdcard/Android/media/com.whatsapp"))
+    self.assertTrue(
+        android_adb._want_tar_stream("/sdcard/Android/data/com.whatsapp"))
+    self.assertFalse(android_adb._want_tar_stream("/data/data/com.whatsapp"))
+
+  def test_empty_dest_is_removed_before_adb_pull(self) -> None:
+    """adb pull nests remote basename if dest already exists as a folder."""
+    session = android_adb.AdbSession.__new__(android_adb.AdbSession)
+    session.serial = "device"
+    session.timeout = 5
+    session._root = False
+    seen: dict = {}
+
+    def fake_pull(remote, dest, timeout):
+      seen["dest"] = dest
+      seen["existed"] = os.path.isdir(dest)
+      target = Path(dest)
+      target.mkdir(parents=True, exist_ok=True)
+      (target / "IMG_001.jpg").write_bytes(b"abc")
+      return mock.Mock(returncode=0, stderr="", stdout="")
+
+    with tempfile.TemporaryDirectory() as tmp:
+      local = Path(tmp) / "com.whatsapp"
+      local.mkdir()
+      self.assertTrue(local.is_dir())
+      with mock.patch.object(session, "_is_remote_dir", return_value=True):
+        with mock.patch.object(session, "_pull_tar_stream", return_value=False):
+          with mock.patch.object(session, "_adb_pull_to", side_effect=fake_pull):
+            ok, _msg = session._pull_once(
+                "/sdcard/Android/media/com.whatsapp", local, verify=False)
+      self.assertTrue(ok)
+      self.assertIn("dest", seen)
+      self.assertFalse(seen["existed"])
+      self.assertTrue((local / "IMG_001.jpg").exists())
+      self.assertFalse((local / "com.whatsapp").exists())
+
+  def test_filter_shared_media_keeps_databases(self) -> None:
+    targets = [
+      ("/sdcard/DCIM", "Files & Media"),
+      ("/sdcard/Android/media/com.whatsapp", "Chats"),
+      ("/sdcard/Android/media/com.whatsapp/WhatsApp/Databases", "Chats"),
+      ("/data/system/usagestats", "Applications"),
+    ]
+    out = [p for p, _ in android_adb.filter_shared_media_targets(
+        targets, skip=True)]
+    self.assertNotIn("/sdcard/DCIM", out)
+    self.assertNotIn("/sdcard/Android/media/com.whatsapp", out)
+    self.assertIn(
+        "/sdcard/Android/media/com.whatsapp/WhatsApp/Databases", out)
+    self.assertIn("/data/system/usagestats", out)
+
+  def test_needs_root_skips_sandbox_keeps_usagestats(self) -> None:
+    self.assertTrue(android_adb.needs_root(
+        "/data/data/com.whatsapp/databases/msgstore.db"))
+    self.assertTrue(android_adb.needs_root("/data/system/locksettings.db"))
+    self.assertFalse(android_adb.needs_root("/data/system/usagestats"))
+    self.assertFalse(android_adb.needs_root("/sdcard/DCIM"))
+    self.assertFalse(android_adb.needs_root("/data/user_de/0"))
+
+  def test_dedupe_drops_android_media_parent(self) -> None:
+    targets = [
+      ("/sdcard/Android/media", "Files & Media"),
+      ("/sdcard/Android/media/com.whatsapp", "Chats"),
+      ("/data/system/usagestats", "Applications"),
+    ]
+    out = [p for p, _ in android_adb.dedupe_pull_targets(targets)]
+    self.assertNotIn("/sdcard/Android/media", out)
+    self.assertIn("/sdcard/Android/media/com.whatsapp", out)
+    self.assertIn("/data/system/usagestats", out)
+
+  def test_chunked_pull_continues_after_child_failure(self) -> None:
+    session = android_adb.AdbSession.__new__(android_adb.AdbSession)
+    session.serial = "dev"
+    session.timeout = 5
+    session._root = False
+
+    def fake_once(remote, local, verify=True, timeout=180):
+      name = remote.rsplit("/", 1)[-1]
+      if name == "bad":
+        return False, "cannot create '...\\\\Wh'"
+      local.parent.mkdir(parents=True, exist_ok=True)
+      local.write_bytes(b"ok")
+      return True, "ok"
+
+    with tempfile.TemporaryDirectory() as tmp:
+      dest = Path(tmp) / "tree"
+      with mock.patch.object(session, "list_remote_children",
+                             return_value=["good.jpg", "bad"]):
+        with mock.patch.object(session, "_is_remote_dir", return_value=False):
+          with mock.patch.object(session, "_pull_once", side_effect=fake_once):
+            ok, msg = session._pull_tree_chunked(
+                "/sdcard/media", dest, False, 180, None)
+    self.assertTrue(ok)
+    self.assertIn("ok-chunked:1/2", msg)
 
 
 class TestComprehensiveAcquire(unittest.TestCase):

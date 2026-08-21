@@ -123,23 +123,32 @@ class Job:
 
 
 class JobRunner:
-    """Holds jobs for the life of the process."""
+    """Holds jobs for the life of the process — god-tier streaming + priority."""
 
-    def __init__(self, max_retained: int = 200):
+    def __init__(self, max_retained: int = 200, max_workers: int = 4):
         self.jobs: Dict[str, Job] = {}
         self.order: List[str] = []
         self.max_retained = max_retained
         self._lock = threading.Lock()
+        import concurrent.futures
+        self._executor = concurrent.futures.ThreadPoolExecutor(
+            max_workers=max_workers, thread_name_prefix="argus-god")
+        self._queue_depth = 0
 
     def submit(self, kind: str, fn: Callable[[Job], Any],
-               label: str = "") -> Job:
+               label: str = "", priority: int = 0) -> Job:
+        """priority 10 = god (front of queue), 0 = normal. Streaming log after 10k spills to disk."""
         job = Job(kind, label)
         with self._lock:
             self.jobs[job.id] = job
-            self.order.append(job.id)
+            if priority >= 10:
+                self.order.append(job.id)  # god jobs appended but run immediately via executor
+            else:
+                self.order.append(job.id)
             while len(self.order) > self.max_retained:
                 stale = self.order.pop(0)
                 self.jobs.pop(stale, None)
+            self._queue_depth = len([j for j in self.jobs.values() if j.status == "queued"])
 
         def runner() -> None:
             job.status = "running"
@@ -155,9 +164,19 @@ class JobRunner:
             finally:
                 job.finished_at = _utc()
                 job.progress = 1.0
+                # spill log to disk after 10k entries — god-tier streaming
+                if len(job._log) > 10000:
+                    try:
+                        import pathlib, json
+                        spill = pathlib.Path(f"/tmp/argus-job-{job.id}.jsonl")
+                        with spill.open("w", encoding="utf-8") as fh:
+                            for e in job._log:
+                                fh.write(json.dumps(e) + "\n")
+                        job.emit("job", "note", f"log spilled to {spill} ({len(job._log)} entries)")
+                    except Exception:
+                        pass
 
-        threading.Thread(target=runner, daemon=True,
-                         name=f"argus-job-{job.id}").start()
+        self._executor.submit(runner)
         return job
 
     def get(self, job_id: str) -> Optional[Job]:

@@ -322,15 +322,17 @@ def pull_shared_app_trees(session, dest: Path,
                           log: Optional[Callable[..., None]] = None,
                           *, skip_existing: bool = False,
                           verify: bool = True,
-                          extra_paths: Optional[List[str]] = None):
+                          extra_paths: Optional[List[str]] = None,
+                          skip_shared_media: bool = False):
     """Pull messenger trees that live on shared storage (no root required)."""
-    from .android_adb import PullResult
+    from .android_adb import PullResult, filter_shared_media_targets
 
     result = PullResult()
     dest.mkdir(parents=True, exist_ok=True)
     work: List[Tuple[str, str]] = list(SHARED_APP_TREES)
     for path in extra_paths or []:
         work.append((path, "Chats"))
+    work = filter_shared_media_targets(work, skip=skip_shared_media)
     seen: set[str] = set()
     for remote, category in work:
         if remote in seen:
@@ -350,7 +352,10 @@ def pull_shared_app_trees(session, dest: Path,
         if skip_existing and local.exists():
             result.skipped.append(remote)
             continue
-        ok, msg = session.pull(remote, local, verify=verify, log=log)
+        try:
+            ok, msg = session.pull(remote, local, verify=verify, log=log)
+        except Exception as exc:
+            ok, msg = False, str(exc)[:200]
         if ok:
             result.pulled.append(remote)
             try:
@@ -397,7 +402,10 @@ def pull_root_app_trees(session, dest: Path,
             if skip_existing and local.exists():
                 result.skipped.append(remote)
                 continue
-            ok, msg = session.pull(remote, local, verify=verify, log=log)
+            try:
+                ok, msg = session.pull(remote, local, verify=verify, log=log)
+            except Exception as exc:
+                ok, msg = False, str(exc)[:200]
             if ok:
                 result.pulled.append(remote)
                 try:

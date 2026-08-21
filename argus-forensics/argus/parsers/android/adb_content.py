@@ -86,11 +86,19 @@ def _parse_rows(text: str) -> List[Dict[str, str]]:
               "content/contacts_data.txt", "content/contacts_email.txt",
               "content/contacts_lookup.txt", "content/contacts_structured.txt",
               "content/icc_adn.txt", "content/icc_sms.txt",
+              "content/icc_adn0.txt", "content/icc_adn1.txt",
+              "content/icc_fdn.txt", "content/icc_sdn.txt",
               "content/vivo_sms.txt", "content/bbk_sms.txt",
-              "content/sec_calls.txt",
+              "content/sec_calls.txt", "content/sec_call.txt",
+              "content/samsung_sms.txt", "content/samsung_msg.txt",
+              "content/samsung_dialer.txt", "content/google_sms.txt",
+              "content/voicemail.txt", "content/blocked.txt",
+              "content/threads_simple.txt", "content/contacts_raw.txt",
               "contacts_export/phones.txt", "contacts_export/phone_data.txt",
               "contacts_export/emails.txt", "contacts_export/vivo_contacts.txt",
-              "contacts_export/bbk_contacts.txt"],
+              "contacts_export/bbk_contacts.txt",
+              "contacts_export/icc_adn.txt",
+              "contacts_export/samsung_phones.txt"],
     platform="android",
     priority=90,
     probe=_probe_content_dump,
@@ -115,18 +123,23 @@ def parse_adb_content(path: Path, ctx: ParseContext) -> ParseResult:
         return res
 
     if name in ("sms", "mms", "threads", "sms_inbox", "sms_sent", "sms_draft",
-                "sms_outbox", "sms_failed", "icc_sms", "vivo_sms", "bbk_sms"):
-        _parse_sms_rows(rows, path, ctx, res, mms=name in ("mms", "threads"))
+                "sms_outbox", "sms_failed", "icc_sms", "vivo_sms", "bbk_sms",
+                "samsung_sms", "samsung_msg", "google_sms", "threads_simple",
+                "coloros_sms", "oppo_sms", "transsion_sms"):
+        _parse_sms_rows(rows, path, ctx, res, mms=name in ("mms", "threads",
+                                                           "threads_simple"))
     elif name == "mms_part":
         _parse_mms_part_rows(rows, path, ctx, res)
     elif name == "mms_addr":
         _parse_mms_addr_rows(rows, path, ctx, res)
-    elif name in ("calls", "sec_calls"):
+    elif name in ("calls", "sec_calls", "sec_call", "samsung_dialer",
+                  "voicemail", "blocked"):
         _parse_call_rows(rows, path, ctx, res)
     elif name in ("contacts", "contacts_all", "contacts_data", "contacts_email",
                   "contacts_lookup", "contacts_structured", "icc_adn",
+                  "icc_adn0", "icc_adn1", "icc_fdn", "icc_sdn",
                   "phones", "phone_data", "emails", "vivo_contacts",
-                  "bbk_contacts"):
+                  "bbk_contacts", "contacts_raw", "samsung_phones"):
         _parse_contact_rows(rows, path, ctx, res)
     else:
         res.notes.append(f"{path.name}: unhandled content dump type")

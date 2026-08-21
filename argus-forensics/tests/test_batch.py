@@ -78,6 +78,17 @@ class TestBatchEngine(unittest.TestCase):
         with self.assertRaises(AcquisitionError):
             BatchAcquisitionPlan(operator="Op", devices=[]).validate()
 
+    def test_apply_performance_settings_is_fast(self) -> None:
+        from argus.acquire.engine import (AcquisitionPlan,
+                                          apply_performance_settings)
+        plan = AcquisitionPlan(
+            operator="Op", exhibit_id="EXH-001", method="mtp")
+        apply_performance_settings(plan)
+        self.assertTrue(plan.verify_pulls)
+        self.assertFalse(plan.skip_device_report)
+        self.assertGreaterEqual(plan.file_timeout, 180)
+        self.assertGreaterEqual(plan.parallel_pulls, 1)
+
     def test_serial_queue_completes_two_devices(self) -> None:
         plan = BatchAcquisitionPlan(
             operator="Op",

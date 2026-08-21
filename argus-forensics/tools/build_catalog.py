@@ -70,6 +70,8 @@ SAMSUNG: List[Row] = [
     ("Galaxy Note 20", "SM-N980F|c1s", "10 - 13", "Exynos 990", "2020-08", "USB-C"),
     ("Galaxy A12", "SM-A125F|a12", "10 - 12", "MediaTek Helio P35", "2020-11", "Micro-USB"),
     ("Galaxy A13", "SM-A135F|a13", "12 - 14", "MediaTek Helio G80", "2022-03", "USB-C"),
+    ("Galaxy A23", "SM-A235F|SM-A235M|SM-A235N|a23", "12 - 14", "Snapdragon 680", "2022-03", "USB-C"),
+    ("Galaxy A23 5G", "SM-A236B|SM-A233F|SM-A236E|SM-A236U|a23xq", "12 - 14", "Snapdragon 695", "2022-03", "USB-C"),
     ("Galaxy A14", "SM-A145F|a14", "13 - 15", "MediaTek Helio G80", "2023-01", "USB-C"),
     ("Galaxy A32", "SM-A325F|a32", "11 - 13", "MediaTek Helio G80", "2021-03", "USB-C"),
     ("Galaxy A50", "SM-A505F|a50", "9 - 11", "Exynos 9610", "2019-03", "USB-C"),

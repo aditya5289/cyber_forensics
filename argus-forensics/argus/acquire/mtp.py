@@ -402,7 +402,7 @@ def _retry_missing_files(device_name: str, destination: Path,
     paths = [m["path"] for m in missing if m.get("path")]
     if not paths:
         return 0
-    batch_size = 80 if turbo else 40
+    batch_size = 120 if turbo else 80
     recovered = 0
     dest = str(destination.resolve())
     for start in range(0, len(paths), batch_size):
@@ -657,13 +657,15 @@ def _resolve_listed_path(expected: str, arrived: Dict[str, Path],
 
 def _should_retry_missing(expected: Dict[str, int], arrived: Dict[str, Path],
                           missing: List[Dict[str, Any]]) -> bool:
-    """Skip per-file MTP retry when bulk copy clearly beat the inventory."""
+    """Retry listed files that did not arrive, unless the inventory is stale.
+
+    Skip per-file retry only when bulk copy clearly *beat* the listing
+    (more files on disk than MTP enumerated). A large shortfall is the
+    opposite — stalls and partial-file deletions — and must be retried.
+    """
     if not missing:
         return False
     if len(arrived) > max(len(expected), 1) * 1.05:
-        return False
-    ratio = len(missing) / max(len(expected), 1)
-    if ratio > 0.35 and len(missing) > 200:
         return False
     return True
 
@@ -795,12 +797,33 @@ def _parallel_copy_jobs(listing: List[Dict[str, Any]],
     return jobs
 
 
+def _volume_child_jobs(volume: str, listing: List[Dict[str, Any]]
+                       ) -> List[Tuple[str, int]]:
+    """Split one storage volume into its top-level folders for stall recovery."""
+    if not volume or volume == "__root__" or not listing:
+        return []
+    prefix = volume.rstrip("/") + "/"
+    children: Dict[str, int] = {}
+    for entry in listing:
+        if entry.get("kind") != "F":
+            continue
+        path = str(entry.get("path") or "")
+        if not path.startswith(prefix):
+            continue
+        child = path[len(prefix):].split("/", 1)[0]
+        if not child:
+            continue
+        key = f"{volume.rstrip('/')}/{child}"
+        children[key] = children.get(key, 0) + 1
+    return sorted(children.items(), key=lambda kv: -kv[1])
+
+
 def _build_copy_script(device_name: str, dest_path: str, expected: int,
                        *, subtree: str = "", turbo: bool = False,
                        skip_existing: bool = True) -> str:
     # Large folders (Android, DCIM) can sit quiet for minutes — need long settle.
-    stable_ps = "18" if turbo else "24"
-    poll_ms = "500" if turbo else "700"
+    stable_ps = "10" if turbo else "12"
+    poll_ms = "400" if turbo else "500"
     report_every = "6" if turbo else "4"
     skip_ps = "$true" if skip_existing else "$false"
     return (_COPY_TREE
@@ -862,7 +885,8 @@ def _run_copy_script(script: str, destination: Path, wait_expected: int,
         quiet=quiet,
         jobs_done=jobs_done,
         jobs_total=jobs_total,
-        disk_stats=stats)
+        disk_stats=stats,
+        stall_exit_seconds=60 if turbo else 75)
     reader.join(timeout=10)
     try:
         proc.wait(timeout=14400)
@@ -910,7 +934,8 @@ def _copy_parallel_subtrees(device_name: str, destination: Path,
                             meter: ProgressMeter,
                             turbo: bool,
                             *,
-                            inventory: Optional[Dict[str, Any]] = None
+                            inventory: Optional[Dict[str, Any]] = None,
+                            listing: Optional[List[Dict[str, Any]]] = None
                             ) -> Tuple[List[str], List[str], int]:
     """Copy MTP storage volumes — one reliable Shell worker per volume."""
     jobs = _coalesce_copy_jobs(jobs)
@@ -1024,6 +1049,24 @@ def _copy_parallel_subtrees(device_name: str, destination: Path,
             jobs_done=done_now, jobs_total=jobs_total,
             disk_stats=disk_stats)
         local = max(0, disk_stats.snapshot(force=True)[0] - baseline)
+        if listing and count and local < int(max(count, 1) * 0.85):
+            kids = _volume_child_jobs(subtree, listing)
+            if kids:
+                say(f"Volume {subtree} short — recovering {len(kids)} folder(s) "
+                    "one at a time…", phase="transfer")
+                for kid, kid_count in kids[:32]:
+                    kid_dest = destination / kid.replace("/", os.sep)
+                    kid_dest.mkdir(parents=True, exist_ok=True)
+                    kid_script = _build_copy_script(
+                        device_name, str(kid_dest.resolve()),
+                        max(kid_count, 1), subtree=kid, turbo=turbo,
+                        skip_existing=True)
+                    _run_copy_script(
+                        kid_script, destination, kid_count, exp_files, say,
+                        meter, exp_bytes, turbo, quiet=True,
+                        wait_root=kid_dest, jobs_done=done_now,
+                        jobs_total=jobs_total, disk_stats=disk_stats)
+                local = max(0, disk_stats.snapshot(force=True)[0] - baseline)
         label = subtree or "(device root)"
         with lock:
             jobs_done += 1
@@ -1368,9 +1411,14 @@ def _copy_progress_message(count: int, expected: int, *,
         else:
             body += " · inventory still running"
     if bytes_cur > 0:
-        body += f" · {human_bytes(bytes_cur)}"
-        if bytes_total > bytes_cur:
-            body += f" / {human_bytes(bytes_total)}"
+        if bytes_total > 0 and bytes_cur > int(bytes_total * 1.25):
+            # In-flight/partial files inflate the on-disk total; don't show
+            # "12 GB / 1.23 GB" as if the listing was wrong.
+            body += f" · {human_bytes(bytes_total)} listed"
+        else:
+            body += f" · {human_bytes(bytes_cur)}"
+            if bytes_total > bytes_cur:
+                body += f" / {human_bytes(bytes_total)}"
     if meter and count > 0 and not stalled:
         rate = meter.rate(count)
         if rate >= 0.5:
@@ -1446,11 +1494,11 @@ def _stable_polls_needed(expected: int, count: int, base: int) -> int:
         return base
     ratio = count / max(expected, 1)
     if ratio < 0.70:
-        return max(base, 40)
+        return max(base, 10)
     if ratio < 0.90:
-        return max(base, 25)
+        return max(base, 8)
     if ratio < 0.97:
-        return max(base, 12)
+        return max(base, 6)
     return base
 
 
@@ -1463,17 +1511,17 @@ def _extended_settle(destination: Path, expected: int, expected_bytes: int,
     if landed >= int(expected * 0.995):
         return landed
     say(f"Only {landed:,} of {expected:,} listed file(s) on disk — "
-        f"waiting for MTP to finish flushing (large folders can take 30+ min)…",
+        f"waiting briefly for MTP to flush, then retrying gaps…",
         phase="transfer",
         progress_current=landed, progress_total=expected,
         bytes_total=expected_bytes)
-    stats = _DiskStats(destination, refresh_sec=3.0)
+    stats = _DiskStats(destination, refresh_sec=2.0)
     return _wait_for_copy(
         destination, expected, say, meter, expected_bytes,
-        proc=None, timeout=3600,
-        stable_polls=30 if turbo else 40,
-        scan_interval=3.0, disk_stats=stats,
-        stall_exit_seconds=90)
+        proc=None, timeout=180,
+        stable_polls=8 if turbo else 10,
+        scan_interval=2.0, disk_stats=stats,
+        stall_exit_seconds=45)
 
 
 def _top_folders_from_listing(listing: List[Dict[str, Any]],
@@ -1605,9 +1653,25 @@ def _wait_for_copy(destination: Path, expected: int,
             scanned_stable += 1
             stall = now - last_growth
             stalled = not alive and stall >= 60
-            if (stall_exit_seconds and not alive and stall >= stall_exit_seconds
-                    and expected > 0 and count < int(expected * 0.97)):
-                if not quiet:
+            hung_worker = alive and stall_exit_seconds and stall >= stall_exit_seconds
+            finished_short = (stall_exit_seconds and not alive
+                              and stall >= stall_exit_seconds
+                              and expected > 0
+                              and count < int(expected * 0.97))
+            if hung_worker or finished_short:
+                if hung_worker and proc is not None:
+                    say(f"Copy worker silent {int(stall)}s — killing hung "
+                        "stream and recovering remaining folders…",
+                        phase="transfer",
+                        progress_current=count,
+                        progress_total=max(expected, count),
+                        bytes_current=bytes_cur,
+                        bytes_total=max(bytes_total, bytes_cur))
+                    try:
+                        proc.kill()
+                    except OSError:
+                        pass
+                elif not quiet:
                     say(f"MTP copy stalled at {count:,}/{expected:,} for "
                         f"{int(stall)}s — moving to folder/file recovery…",
                         phase="transfer",
@@ -1658,6 +1722,80 @@ def _sha256(path: Path) -> str:
     except OSError:
         return ""
     return digest.hexdigest()
+
+
+def check_free_space(destination: Path, needed_bytes: int,
+                     headroom: float = 0.05) -> dict:
+    """Pre-flight free-space check with configurable headroom.
+
+    Returns dict with ok, free, needed, shortfall. headroom is 5% default
+    (10% for >10GB acquisitions is applied by caller). Never raises — a
+    failure to stat is reported as ok=True with a warning so acquisition
+    can still proceed on exotic filesystems.
+    """
+    try:
+        free = shutil.disk_usage(destination).free if destination.exists() else shutil.disk_usage(destination.parent).free
+    except OSError:
+        return {"ok": True, "free": -1, "needed": needed_bytes, "warning": "free-space check unavailable"}
+    needed = int(needed_bytes * (1.0 + headroom))
+    if free < needed:
+        return {"ok": False, "free": free, "needed": needed, "shortfall": needed - free}
+    return {"ok": True, "free": free, "needed": needed, "shortfall": 0}
+
+
+def verify_manifest(manifest_path: Path | str, root: Path | str | None = None) -> dict:
+    """Re-hash acquisition against its manifest — mirrors PowerShell Verify.
+
+    Reports unchanged / altered / missing / added. Returns dict with counts
+    and detail lists. Hash mismatches are integrity failures, not silent.
+    """
+    manifest_path = Path(manifest_path)
+    if root is None:
+        root = manifest_path.parent
+    else:
+        root = Path(root)
+    try:
+        data = json.loads(manifest_path.read_text(encoding="utf-8"))
+    except (OSError, json.JSONDecodeError) as exc:
+        return {"ok": False, "error": str(exc), "unchanged": [], "altered": [], "missing": [], "added": []}
+    hashes: dict = data.get("hashes") or {}
+    # support both flat hashes and nested manifest shapes
+    if not hashes and "hashes" in data:
+        hashes = data["hashes"]
+    unchanged: list = []
+    altered: list = []
+    missing: list = []
+    for rel, expected in hashes.items():
+        local = root / rel.replace("/", os.sep)
+        if not local.is_file():
+            # also try as stored rel with backslash on Windows manifests
+            alt = root / rel.replace("\\", os.sep).replace("/", os.sep)
+            if alt.is_file():
+                local = alt
+            else:
+                missing.append(rel)
+                continue
+        actual = _sha256(local)
+        if not actual:
+            missing.append(rel)
+        elif actual.lower() == str(expected).lower():
+            unchanged.append(rel)
+        else:
+            altered.append({"path": rel, "expected": expected, "actual": actual})
+    # detect added files not in manifest
+    arrived = _index_arrived(root)
+    added = [rel for rel in arrived if rel not in hashes and rel.replace(os.sep, "/") not in hashes and rel.replace("/", "\\") not in hashes]
+    # also handle case-insensitive manifest keys
+    manifest_lower = {k.lower(): k for k in hashes}
+    added = [rel for rel in added if rel.lower() not in manifest_lower]
+    return {
+        "ok": len(altered) == 0 and len(missing) == 0,
+        "unchanged": unchanged,
+        "altered": altered,
+        "missing": missing,
+        "added": added,
+        "counts": {"unchanged": len(unchanged), "altered": len(altered), "missing": len(missing), "added": len(added)},
+    }
 
 
 def _acquire_unix(device_name: str, destination: Path,
@@ -1885,6 +2023,29 @@ def acquire(device_name: str, destination: Path | str,
             phase="inventory", progress_current=0,
             progress_total=len(expected), bytes_total=expected_bytes)
 
+    # ---- pre-flight free-space check (mirrors PowerShell 5% + 10% for >10GB) ----
+    if expected_bytes > 0:
+        headroom = 0.10 if expected_bytes > 10 * (1024 ** 3) else 0.05
+        space = check_free_space(destination, expected_bytes, headroom=headroom)
+        if space.get("free", -1) >= 0:
+            say(f"Free on destination: {human_bytes(space['free'])} — "
+                f"needed {human_bytes(space['needed'])} "
+                f"({len(expected):,} files, {human_bytes(expected_bytes)} + {int(headroom*100)}% headroom)",
+                phase="inventory")
+            if not space["ok"]:
+                short = space.get("shortfall", 0)
+                msg = (f"NOT ENOUGH FREE SPACE — need {human_bytes(space['needed'])}, "
+                       f"have {human_bytes(space['free'])} (short by {human_bytes(short)}). "
+                       f"Free space or choose another destination. Nothing has been copied yet.")
+                result.warnings.append(msg)
+                say(msg, phase="inventory", level="error")
+                result.finished_at = time.strftime("%Y-%m-%dT%H:%M:%S%z")
+                return result
+            if space["free"] < space["needed"] * 1.5:
+                warn = "Space is tight — will leave under 50% headroom after copy."
+                result.warnings.append(warn)
+                say(warn, phase="inventory", level="warning")
+
     pre_arrived: Dict[str, int] = {}
     matched = 0
     if resume:
@@ -1921,7 +2082,8 @@ def acquire(device_name: str, destination: Path | str,
         job_warnings, job_errors, landed_count = _copy_parallel_subtrees(
             device_name, destination, parallel_jobs,
             len(expected), expected_bytes, say, meter, turbo,
-            inventory=inventory_live if listing_thread else None)
+            inventory=inventory_live if listing_thread else None,
+            listing=listing or listing_box)
         result.warnings.extend(job_warnings)
         if job_errors:
             result.warnings.append("; ".join(job_errors[:3]))
@@ -2113,10 +2275,15 @@ def acquire(device_name: str, destination: Path | str,
             })
         result.missing = still_missing
     elif result.missing:
-        say(f"Skipping per-file retry — {len(arrived):,} file(s) on disk "
-            f"vs {len(expected):,} listed (bulk copy exceeded inventory).",
-            phase="transfer")
-        result.missing = result.missing[:100]
+        if len(arrived) > len(expected):
+            say(f"Skipping per-file retry — {len(arrived):,} file(s) on disk "
+                f"vs {len(expected):,} listed (bulk copy exceeded inventory).",
+                phase="transfer")
+            result.missing = result.missing[:100]
+        else:
+            say(f"{len(result.missing):,} listed file(s) did not arrive "
+                f"({len(arrived):,} on disk vs {len(expected):,} listed).",
+                phase="transfer")
 
     result.finished_at = time.strftime("%Y-%m-%dT%H:%M:%S%z")
     if result.missing:

@@ -291,7 +291,9 @@ def cmd_acquire(args, out: Out) -> int:
         resume=bool(args.resume),
         resume_container=args.resume_container or None,
         turbo=bool(args.turbo),
-        physical_full=bool(getattr(args, "physical_full", False)))
+        physical_full=bool(getattr(args, "physical_full", False)),
+        file_timeout=int(getattr(args, "file_timeout", 180)),
+        god=bool(getattr(args, "god", False)))
 
     def progress(entry):
         level = entry.get("level", "info")
@@ -441,6 +443,23 @@ def cmd_verify(args, out: Out) -> int:
             for p in result["problems"]:
                 out.err(p)
             exit_code = 4
+        # Enhanced: also verify MTP/ADB acquisition manifests where present
+        try:
+            from .acquire.engine import verify_acquisition
+            mres = verify_acquisition(Path(path))
+            if mres.get("manifests"):
+                for name, mv in mres["manifests"].items():
+                    if not mv.get("ok"):
+                        out.err(f"Manifest {name}: {mv.get('counts')}")
+                        for a in mv.get("altered", [])[:3]:
+                            out.err(f"  ALTERED {a.get('path')}")
+                        for mi in mv.get("missing", [])[:3]:
+                            out.err(f"  MISSING {mi}")
+                        exit_code = 4
+                    elif mv.get("counts", {}).get("unchanged", 0) > 0:
+                        out.ok(f"Manifest {name}: {mv['counts']['unchanged']} file(s) verified")
+        except Exception:
+            pass
         container.close()
     return exit_code
 
@@ -1030,15 +1049,52 @@ def cmd_mtp(args, out: Out) -> int:
         out.info("Acquire with:  argus mtp acquire \"<device>\" --out <dir>")
         return 0
 
+    if args.mtp_action == "verify":
+        from pathlib import Path
+        p = Path(args.path)
+        manifest = p if p.is_file() else p / "argus-mtp-manifest.json"
+        if not manifest.is_file():
+            # also try raw subdir
+            alt = p / "raw" / "argus-mtp-manifest.json"
+            if alt.is_file():
+                manifest = alt
+        if not manifest.is_file():
+            out.err(f"No manifest found at {manifest}")
+            return 1
+        res = mtp.verify_manifest(manifest, root=manifest.parent)
+        if getattr(args, "json", False):
+            import json as _json
+            print(_json.dumps(res, indent=2))
+            return 0 if res.get("ok") else 4
+        out.title(f"MTP Verify — {manifest.parent.name}")
+        out.kv("unchanged", res["counts"]["unchanged"])
+        out.kv("altered", res["counts"]["altered"])
+        out.kv("missing", res["counts"]["missing"])
+        out.kv("added", res["counts"]["added"])
+        if res.get("ok"):
+            out.ok("VERIFIED — all hashed files unchanged.")
+            return 0
+        for a in res.get("altered", [])[:8]:
+            out.err(f"ALTERED: {a['path']}")
+        for m in res.get("missing", [])[:8]:
+            out.err(f"MISSING: {m}")
+        for ad in res.get("added", [])[:8]:
+            out.warn(f"ADDED (not in manifest): {ad}")
+        return 4
+
     name = args.device or (found[0].name if found else "")
     if not name:
         out.err("No MTP handset is mounted.")
         return 1
 
-    out.title(f"Acquiring {name}")
+    out.title(f"Acquiring {name}" + (" [GOD]" if getattr(args, "god", False) else ""))
     out.warn(mtp.METHOD_NOTE)
+    god = bool(getattr(args, "god", False))
+    # god forces full hashing + no turbo fast-lane, even if --turbo also passed
     result = mtp.acquire(name, args.out, progress=out.info,
-                         hash_files=not args.no_hash)
+                         hash_files=(not args.no_hash) or god,
+                         resume=bool(getattr(args, "resume", False)),
+                         turbo=(bool(getattr(args, "turbo", False)) and not god))
 
     out.title("Result")
     out.kv("files copied", f"{result.files_copied:,}")
@@ -1517,6 +1573,10 @@ def build_parser() -> argparse.ArgumentParser:
     a.add_argument("--turbo", action="store_true",
                    help="fastest extraction — parallel pulls, no carving, "
                         "no per-file verify during transfer")
+    a.add_argument("--file-timeout", type=int, default=180,
+                   help="per-file ADB pull timeout seconds (default 180; enhanced acquisition)")
+    a.add_argument("--god", action="store_true",
+                   help="god-level acquisition — maximum thoroughness + parallelism (9 passes, 300s timeout, all categories, verify)")
 
     ab = sub.add_parser("acquire-batch",
                         help="extract many connected handsets in one queue")
@@ -1725,6 +1785,15 @@ def build_parser() -> argparse.ArgumentParser:
     mta.add_argument("--out", required=True, help="destination directory")
     mta.add_argument("--no-hash", action="store_true",
                      help="skip per-file hashing (faster, less defensible)")
+    mta.add_argument("--turbo", action="store_true",
+                     help="turbo MTP — disable hashing, faster settle (enhanced acquisition)")
+    mta.add_argument("--resume", action="store_true",
+                     help="resume interrupted MTP copy (uses listing cache)")
+    mta.add_argument("--god", action="store_true",
+                     help="god-level MTP — 3 Shell workers, 9-pass ADB overlay, 300s timeout, verify")
+    mtv = mts.add_parser("verify", help="re-hash an MTP acquisition against its manifest")
+    mtv.add_argument("path", help="destination dir or manifest path")
+    mtv.add_argument("--json", action="store_true", help="output JSON")
 
     bs = sub.add_parser("bus",
                         help="list every attached device and volume the "
@@ -1770,9 +1839,77 @@ def build_parser() -> argparse.ArgumentParser:
     idp.add_argument("source")
     idp.add_argument("--json", action="store_true")
 
+    # god-tier single-command pipeline
+    gd = sub.add_parser("god", help="god-tier end-to-end: acquire --god → verify → report → certificate")
+    gd.add_argument("case", help="case folder (will be created if missing)")
+    gd.add_argument("--exhibit", required=True, help="exhibit ID")
+    gd.add_argument("--operator", required=True, help="operator name")
+    gd.add_argument("--method", default="comprehensive", choices=["comprehensive","filesystem","logical","mtp","physical","god"])
+    gd.add_argument("--device", default="", help="device model for manual check")
+    gd.add_argument("--serial", default=None)
+    gd.add_argument("--out", default="./reports", help="report output dir")
+    gd.add_argument("--formats", default="html,pdf,xlsx,json", help="report formats")
+    gd.add_argument("--quick", action="store_true", help="skip deep verify in pipeline")
+
     # parsers
     sub.add_parser("parsers", help="list registered artifact parsers")
     return p
+
+
+def cmd_god(args, out: Out) -> int:
+    """God-tier pipeline: acquire --god → verify → report → certificate (single command)."""
+    from pathlib import Path as _P
+    from .acquire.engine import AcquisitionEngine, AcquisitionPlan
+    from .core.case import Case as _Case, Exhibit as _Exhibit
+    from .core.container import EvidenceContainer as _EC
+    from .report.builder import ReportBuilder as _RB, ReportOptions as _RO
+    case_path = _P(args.case)
+    # 1. case
+    if not (case_path / "case.json").exists():
+        out.title("GOD — creating case")
+        case = _Case.create(str(case_path.parent), case_id=case_path.name, investigator=args.operator, organisation="", description="god-tier pipeline")
+        case_path = case.root
+    else:
+        case = _Case.open(str(case_path))
+    # 2. exhibit
+    try:
+        case.add_exhibit(_Exhibit(exhibit_id=args.exhibit, make=args.device.split()[0] if args.device else "", model=args.device))
+        out.ok(f"Exhibit {args.exhibit} registered")
+    except Exception:
+        out.info(f"Exhibit {args.exhibit} already registered")
+    # 3. acquire god
+    out.title("GOD — acquiring (comprehensive, 9 passes, 300s, verify)")
+    plan = AcquisitionPlan(method="comprehensive" if args.method=="god" else args.method, operator=args.operator, exhibit_id=args.exhibit, device_name=args.device, serial=args.serial, god=True, file_timeout=300, recover_deleted=True, verify_pulls=True)
+    try:
+        from .devices.detect import require_device as _req
+        dev = _req(args.serial) if args.serial else None
+    except Exception:
+        dev = None
+    engine = AcquisitionEngine(case)
+    report = engine.run(plan, device=dev)
+    out.kv("container", report.container)
+    out.kv("artifacts", report.artifacts)
+    out.kv("status", report.status)
+    if report.status.startswith("Failed"):
+        out.err("Acquisition failed — aborting god pipeline")
+        return 1
+    # 4. verify
+    out.title("GOD — verifying manifest + seal")
+    from .acquire.engine import verify_acquisition as _va
+    vres = _va(report.container)
+    out.kv("manifests", len(vres.get("manifests",{})))
+    out.kv("ok", vres.get("ok"))
+    # 5. report
+    out.title("GOD — building report (all formats, graph, timeline, intel)")
+    from .analyze.session import AnalysisSession as _AS
+    with _AS([_P(report.container)]) as sess:
+        builder = _RB(sess, _RO(formats=[f.strip() for f in args.formats.split(",") if f.strip()], include_deleted=True, include_graph=True, include_timeline=True, include_intelligence=True, examiner=args.operator))
+        written = builder.write(_P(args.out), basename=f"god-{args.exhibit}")
+    for p in written:
+        out.ok(f"Report {p} ({_human(p.stat().st_size)})")
+    out.title("GOD PIPELINE COMPLETE")
+    out.ok(f"Case {case_path} Exhibit {args.exhibit} — container {report.container}")
+    return 0
 
 
 DISPATCH = {
@@ -1788,7 +1925,7 @@ DISPATCH = {
     "analyze": cmd_analyze, "query": cmd_query, "keywords": cmd_keywords,
     "stats": cmd_stats,
     "graph": cmd_graph, "report": cmd_report, "carve": cmd_carve,
-    "parsers": cmd_parsers,
+    "parsers": cmd_parsers, "god": cmd_god,
 }
 
 

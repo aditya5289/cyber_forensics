@@ -34,14 +34,124 @@ from typing import Any, Callable, Dict, Iterable, List, Optional, Tuple
 
 from ..core.errors import AcquisitionError
 from ..core.hashing import hash_file
+from ..core.paths import (
+    dir_nonempty,
+    ensure_dir,
+    host_fs_path,
+    is_win_path_error,
+    make_short_stage,
+    path_too_long_for_win32,
+    relocate_tree,
+    rmdir_if_empty,
+    safe_dest,
+    tree_bytes,
+)
 from ..devices.detect import find_tool
 
 
 def _want_tar_stream(remote: str) -> bool:
     """Whole-tree paths where a tar pipe beats adb's per-file sync protocol."""
     path = (remote or "").rstrip("/")
-    return path in {"/sdcard", "/storage/emulated/0", "/data/media/0"} \
-        or path.startswith("/storage/")
+    if path in {"/sdcard", "/storage/emulated/0", "/data/media/0"}:
+        return True
+    if path.startswith("/storage/"):
+        return True
+    # Messenger media trees nest deep enough to overflow Windows MAX_PATH
+    # when mirrored under the exhibit container.
+    return "/Android/media/" in path or path.startswith("/sdcard/Android/")
+
+
+# Bulk shared-storage trees MTP already copies into the exhibit. An ADB
+# overlay after MTP should not re-pull DCIM / WhatsApp Video — that is the
+# slow path that also trips Windows MAX_PATH. High-value exceptions
+# (Databases, crypt backups, keys) stay queued.
+_SHARED_MEDIA_PREFIXES = (
+    "/sdcard/DCIM", "/sdcard/Pictures", "/sdcard/Movies", "/sdcard/Music",
+    "/sdcard/Download", "/sdcard/Recordings", "/sdcard/Android/media",
+    "/sdcard/WhatsApp", "/sdcard/Telegram", "/storage/emulated/0",
+)
+_SHARED_MEDIA_KEEP = (
+    "/Databases", "/Backups", ".crypt", "/files/key",
+    "com.samsung.android.messaging",
+    "com.google.android.apps.messaging",
+    "SMSBackup",
+    "/Samsung/Messages",
+)
+_BROAD_MEDIA_PARENTS = (
+    "/sdcard/Android/media", "/sdcard", "/storage/emulated/0",
+)
+
+
+def _is_descendant(path: str, ancestor: str) -> bool:
+    a = (ancestor or "").rstrip("/")
+    p = (path or "").rstrip("/")
+    return bool(a) and p != a and p.startswith(a + "/")
+
+
+def dedupe_pull_targets(targets: List[Tuple[str, str]]) -> List[Tuple[str, str]]:
+    """Drop a path already covered by a queued ancestor, and drop giant
+    ``/sdcard/Android/media`` parents when a package tree is also queued."""
+    paths = {p.rstrip("/") for p, _ in targets}
+    drop_broad = any(
+        p.startswith("/sdcard/Android/media/") for p in paths)
+    filtered: List[Tuple[str, str]] = []
+    for path, cat in targets:
+        if drop_broad and path.rstrip("/") in _BROAD_MEDIA_PARENTS:
+            continue
+        filtered.append((path, cat))
+    kept: List[Tuple[str, str]] = []
+    kept_paths: List[str] = []
+    for path, cat in sorted(filtered, key=lambda t: t[0].count("/")):
+        if any(_is_descendant(path, k) for k in kept_paths):
+            continue
+        kept.append((path, cat))
+        kept_paths.append(path.rstrip("/"))
+    rank = {p: i for i, (p, _) in enumerate(targets)}
+    kept.sort(key=lambda t: rank.get(t[0], 10_000))
+    return kept
+
+
+def filter_shared_media_targets(
+        targets: List[Tuple[str, str]], *, skip: bool
+        ) -> List[Tuple[str, str]]:
+    """When *skip* is set, keep Databases/Backups/crypt and drop bulk media."""
+    if not skip:
+        return targets
+    out: List[Tuple[str, str]] = []
+    for path, cat in targets:
+        if any(token in path for token in _SHARED_MEDIA_KEEP):
+            out.append((path, cat))
+            continue
+        skipped = False
+        for prefix in _SHARED_MEDIA_PREFIXES:
+            p = prefix.rstrip("/")
+            if path == p or path.startswith(p + "/"):
+                skipped = True
+                break
+        if not skipped:
+            out.append((path, cat))
+    return out
+
+
+_UNROOTED_OK_PREFIXES = (
+    "/data/system/usagestats",
+    "/data/system/netstats",
+    "/data/user_de/",
+)
+
+
+def needs_root(path: str) -> bool:
+    """True when this path is unreadable without a root shell."""
+    p = (path or "").rstrip("/")
+    for allow in _UNROOTED_OK_PREFIXES:
+        if p == allow.rstrip("/") or p.startswith(allow):
+            return False
+    return (
+        p.startswith("/data/data/")
+        or p.startswith("/data/misc/")
+        or p.startswith("/data/system/")
+        or p.startswith("/data/system_ce/")
+    )
 
 # Content-provider URIs used by the logical action
 PROVIDERS: Dict[str, Tuple[str, str]] = {
@@ -75,6 +185,9 @@ _PROVIDER_FALLBACKS: Dict[str, List[str]] = {
         "content://com.android.contacts/raw_contacts",
         "content://com.vivo.contacts/contacts",
         "content://com.bbk.contacts/contacts",
+        "content://icc/adn",
+        "content://icc/adn/subId/0",
+        "content://icc/adn/subId/1",
     ],
     "contacts_all": [
         "content://com.android.contacts/data",
@@ -87,12 +200,54 @@ _PROVIDER_FALLBACKS: Dict[str, List[str]] = {
         "content://sms/draft",
         "content://mms-sms/conversations",
         "content://com.android.mms-sms",
+        "content://com.samsung.android.messaging",
+        "content://com.samsung.android.messaging/message",
+        "content://com.samsung.android.messaging/sms",
+        "content://com.google.android.apps.messaging.datamodel.MmsSmsProvider",
+        "content://icc/sms",
+    ],
+    "sms_inbox": [
+        "content://sms/inbox",
+        "content://com.samsung.android.messaging",
+        "content://com.samsung.android.messaging/sms",
+    ],
+    "sms_sent": [
+        "content://sms/sent",
+        "content://com.samsung.android.messaging/sms",
     ],
     "calls": [
         "content://call_log/calls",
+        "content://logs/call",
+        "content://logs/calls",
         "content://com.android.contacts/calls",
         "content://com.vivo.contacts/calls",
+        "content://com.samsung.android.dialer/calls",
+        "content://com.sec.android.app.dialer/calls",
+        "content://com.samsung.android.providers.context/log",
     ],
+}
+
+# Explicit columns — some OEMs return empty rows for ``--projection *``.
+_QUERY_PROJECTIONS: Dict[str, str] = {
+    "sms": "_id:thread_id:address:person:date:date_sent:read:status:type:body:locked:sub_id:seen",
+    "sms_inbox": "_id:thread_id:address:date:date_sent:read:type:body:sub_id",
+    "sms_sent": "_id:thread_id:address:date:date_sent:read:type:body:sub_id",
+    "sms_draft": "_id:thread_id:address:date:type:body",
+    "sms_outbox": "_id:thread_id:address:date:type:body",
+    "sms_failed": "_id:thread_id:address:date:type:body",
+    "mms": "_id:thread_id:date:msg_box:m_type:m_size:sub:ct_t:read",
+    "mms_part": "_id:mid:seq:ct:name:chset:cl:text",
+    "mms_addr": "_id:msg_id:address:type:charset",
+    "threads": "_id:date:message_count:recipient_ids:snippet:read",
+    "calls": "_id:number:date:duration:type:name:new:presentation:geocoded_location:via_number:subscription_id",
+    "contacts": "display_name:data1:data2:mimetype:contact_id:lookup",
+    "contacts_all": "_id:display_name:times_contacted:last_time_contacted:lookup",
+    "contacts_data": "contact_id:mimetype:data1:data2:data3:display_name",
+    "contacts_email": "display_name:data1:mimetype:contact_id",
+    "icc_adn": "name:number:_id",
+    "icc_sms": "address:body:date:type",
+    "voicemail": "_id:number:date:duration:source_package",
+    "calendar": "_id:title:dtstart:dtend:eventLocation:description:calendar_id",
 }
 
 # Shared-storage paths that may hold SMS/contact exports (no root required).
@@ -131,8 +286,16 @@ COMM_EXPORT_PATHS: List[Tuple[str, str]] = [
     ("/sdcard/MIUI/backup", "Other"),
     ("/storage/emulated/0/MIUI/backup", "Other"),
     ("/sdcard/Samsung/backup", "Other"),
+    ("/sdcard/Samsung/Messages", "Messages"),
+    ("/sdcard/Samsung/Messaging", "Messages"),
+    ("/sdcard/Android/data/com.samsung.android.messaging", "Messages"),
+    ("/sdcard/Android/data/com.google.android.apps.messaging", "Messages"),
+    ("/sdcard/Android/data/com.android.mms", "Messages"),
     ("/sdcard/Google Messages", "Messages"),
     ("/storage/emulated/0/Google Messages", "Messages"),
+    ("/storage/emulated/0/Samsung/Messages", "Messages"),
+    ("/storage/emulated/0/Android/data/com.samsung.android.messaging", "Messages"),
+    ("/storage/emulated/0/Android/data/com.google.android.apps.messaging", "Messages"),
     ("/sdcard/HiOS", "Other"),
     ("/sdcard/XOS", "Other"),
     ("/sdcard/PhoneClone", "Other"),
@@ -149,7 +312,12 @@ _COMM_CATEGORIES = frozenset({
 _DUMPSYS_COMMS = (
     ("call_log", "dumpsys call_log", "Calls"),
     ("telephony", "dumpsys telephony.registry", "Calls"),
+    ("telecom", "dumpsys telecom", "Calls"),
+    ("phone", "dumpsys phone", "Calls"),
+    ("sms", "dumpsys sms", "Messages"),
     ("contacts", "dumpsys contact", "Contacts"),
+    ("isub", "dumpsys isub", "Calls"),
+    ("notification", "dumpsys notification --noredact", "Messages"),
 )
 
 _DUMPSYS_LOCATION = (
@@ -166,6 +334,10 @@ _DUMPSYS_EXTRA = (
     ("netstats", "dumpsys netstats", "Networks"),
     ("clipboard", "dumpsys clipboard", "Messages"),
     ("telecom_dump", "dumpsys telecom", "Calls"),
+    ("sms", "dumpsys sms", "Messages"),
+    ("isub", "dumpsys isub", "Calls"),
+    ("iphonesubinfo", "dumpsys iphonesubinfo", "Calls"),
+    ("notification", "dumpsys notification --noredact", "Messages"),
     ("media_session", "dumpsys media_session", "Files & Media"),
 )
 
@@ -266,6 +438,7 @@ class AdbSession:
         self.serial = serial
         self.timeout = timeout
         self._root: Optional[bool] = None
+        self._kind_cache: Dict[str, str] = {}
 
     def _cmd(self, *args: str) -> List[str]:
         adb = find_tool("adb") or "adb"
@@ -295,15 +468,67 @@ class AdbSession:
     @property
     def has_root(self) -> bool:
         if self._root is None:
-            out = self.shell("id").strip()
-            self._root = "uid=0" in out or bool(self.shell("which su").strip())
+            out = self.shell("id", timeout=8).strip()
+            self._root = "uid=0" in out or bool(self.shell("which su", timeout=8).strip())
         return self._root
 
     def exists(self, remote: str) -> bool:
-        probe = f'ls -d {shlex.quote(remote)} 2>/dev/null'
+        try:
+            return self.classify_paths([remote]).get(remote, "N") in ("D", "F")
+        except AcquisitionError:
+            return False
+
+    def classify_paths(self, remotes: List[str]) -> Dict[str, str]:
+        """One shell for many paths: ``D`` dir, ``F`` file, ``N`` missing."""
+        if not hasattr(self, "_kind_cache") or self._kind_cache is None:
+            self._kind_cache = {}
+        pending = [p for p in remotes if p and p not in self._kind_cache]
+        for i in range(0, len(pending), 40):
+            chunk = pending[i:i + 40]
+            parts: List[str] = []
+            for path in chunk:
+                q = shlex.quote(path)
+                tag = path.replace("\n", "")
+                parts.append(
+                    f'if [ -d {q} ]; then echo "D {tag}"; '
+                    f'elif [ -e {q} ]; then echo "F {tag}"; '
+                    f'else echo "N {tag}"; fi')
+            script = " ; ".join(parts)
+            if self.has_root:
+                script = f"su -c {shlex.quote(script)}"
+            try:
+                out = self.shell(script, timeout=20)
+            except AcquisitionError:
+                out = ""
+            seen: set[str] = set()
+            for line in (out or "").splitlines():
+                if len(line) < 3 or line[1] != " ":
+                    continue
+                kind, path = line[0], line[2:]
+                if kind in ("D", "F", "N") and path:
+                    self._kind_cache[path] = kind
+                    seen.add(path)
+            for path in chunk:
+                if path not in seen:
+                    self._kind_cache[path] = "N"
+        return {p: self._kind_cache.get(p, "N") for p in remotes}
+
+    def list_remote_children(self, remote: str) -> List[str]:
+        """Immediate child names under *remote* (files and directories)."""
+        cmd = f"ls -1p {shlex.quote(remote)} 2>/dev/null"
         if self.has_root:
-            probe = f'su -c {shlex.quote(probe)}'
-        return bool(self.shell(probe).strip())
+            cmd = f"su -c {shlex.quote(cmd)}"
+        names: List[str] = []
+        try:
+            raw = self.shell(cmd, timeout=15)
+        except AcquisitionError:
+            return []
+        for line in (raw or "").splitlines():
+            name = line.strip().rstrip("/")
+            if not name or name in (".", ".."):
+                continue
+            names.append(name)
+        return names
 
     def remote_sha256(self, remote: str) -> str:
         cmd = f"sha256sum {shlex.quote(remote)} 2>/dev/null"
@@ -316,35 +541,117 @@ class AdbSession:
     # ------------------------------------------------------------------ pull
     def pull(self, remote: str, local: Path,
              verify: bool = True, retries: int = 2,
+             file_timeout: int = 180,
              log: Optional[Callable[..., None]] = None) -> Tuple[bool, str]:
-        """Pull one path with automatic retry and reconnect. Returns ``(ok, message)``."""
+        """Pull one path with automatic retry, reconnect and per-file timeout. Returns ``(ok, message)``.
+
+        Enhanced: per-file timeout (default 180s, caller may override), adaptive
+        backoff (0.8s, 2s, 5s) and reconnect on offline/timeout. Integrity
+        failures trigger immediate retry with fresh ADB session.
+        """
         last = "unknown error"
         for attempt in range(retries + 1):
-            ok, msg = self._pull_once(remote, local, verify=verify)
+            try:
+                ok, msg = self._pull_once(remote, local, verify=verify, timeout=file_timeout)
+            except AcquisitionError as exc:
+                ok, msg = False, str(exc)[:250]
+            except OSError as exc:
+                ok, msg = False, str(exc)[:250]
             if ok:
                 return True, "ok"
             last = msg
+            low = msg.lower()
+            if any(k in low for k in ("cannot create", "path too long",
+                                      "filename or extension is too long")):
+                chunked_ok, chunked_msg = self._pull_tree_chunked(
+                    remote, local, verify=False, timeout=file_timeout, log=log)
+                if chunked_ok:
+                    return True, chunked_msg
+                last = chunked_msg or last
             if attempt < retries:
-                if "offline" in msg.lower() or "not found" in msg.lower():
+                if any(k in low for k in ("offline", "timeout", "timed out", "integrity mismatch", "closed")):
                     ensure_device_ready(self, log=log)
-                time.sleep(0.4 * (attempt + 1))
+                    time.sleep(0.8 * (attempt + 1))
+                elif "not found" in low or "no such file" in low:
+                    break
+                elif "permission denied" in low:
+                    break
+                else:
+                    time.sleep(0.4 * (attempt + 1) * (1.5 if attempt > 0 else 1))
+        # Last chance: a directory that failed as a single pull still has
+        # reachable children (MAX_PATH, one locked file, toybox tar missing).
+        if "permission denied" not in last.lower() \
+                and "not found" not in last.lower():
+            try:
+                if self._is_remote_dir(remote):
+                    ok, msg = self._pull_tree_chunked(
+                        remote, local, verify=False, timeout=file_timeout, log=log)
+                    if ok:
+                        return True, msg
+                    last = msg or last
+            except (AcquisitionError, OSError):
+                pass
+        return False, last
+
+    def _pull_tree_chunked(self, remote: str, local: Path,
+                           verify: bool, timeout: int,
+                           log: Optional[Callable[..., None]] = None,
+                           *, depth: int = 0) -> Tuple[bool, str]:
+        """Pull a directory child-by-child so one bad file cannot abort the tree."""
+        if depth > 5:
+            return False, "chunked pull depth exceeded"
+        try:
+            children = self.list_remote_children(remote)
+        except AcquisitionError as exc:
+            return False, str(exc)[:200]
+        if not children:
+            return False, "empty or unlistable"
+        ensure_dir(local)
+        landed = 0
+        last = "no children copied"
+        for name in children:
+            child_r = f"{remote.rstrip('/')}/{name}"
+            child_l = safe_dest(local, name)
+            try:
+                ok, msg = self._pull_once(
+                    child_r, child_l, verify=verify, timeout=timeout)
+            except (AcquisitionError, OSError) as exc:
+                ok, msg = False, str(exc)[:200]
+            if not ok:
+                try:
+                    is_dir = self._is_remote_dir(child_r)
+                except AcquisitionError:
+                    is_dir = False
+                if is_dir:
+                    ok, msg = self._pull_tree_chunked(
+                        child_r, child_l, verify, timeout, log, depth=depth + 1)
+            if ok:
+                landed += 1
+            else:
+                last = msg
+                if log:
+                    log("adb.filesystem", "warning",
+                        f"{child_r}: {msg[:160]} — continuing with remaining files",
+                        level="warning")
+        if landed:
+            return True, f"ok-chunked:{landed}/{len(children)}"
         return False, last
 
     def _is_remote_dir(self, remote: str) -> bool:
-        probe = f'test -d {shlex.quote(remote)} && echo DIR'
-        if self.has_root:
-            probe = f'su -c {shlex.quote(probe)}'
-        return "DIR" in self.shell(probe)
+        try:
+            return self.classify_paths([remote]).get(remote) == "D"
+        except AcquisitionError:
+            return False
 
     def _pull_tar_stream(self, remote: str, local: Path) -> bool:
         """Stream a remote directory as tar — far faster than per-file adb pull."""
         host_tar = shutil.which("tar")
         if not host_tar:
             return False
-        which = self.shell("command -v tar 2>/dev/null").strip().splitlines()
+        which = self.shell("command -v tar 2>/dev/null", timeout=8).strip().splitlines()
         if not which:
             return False
-        local.mkdir(parents=True, exist_ok=True)
+        ensure_dir(local)
         adb = find_tool("adb") or "adb"
         remote_cmd = f"tar cf - -C {shlex.quote(remote)} . 2>/dev/null"
         try:
@@ -352,41 +659,80 @@ class AdbSession:
                 [adb, "-s", self.serial, "exec-out", remote_cmd],
                 stdout=subprocess.PIPE, stderr=subprocess.DEVNULL)
             dst = subprocess.run(
-                [host_tar, "-xf", "-", "-C", str(local)],
-                stdin=src.stdout, capture_output=True, timeout=14400)
+                [host_tar, "-xf", "-", "-C", host_fs_path(local)],
+                stdin=src.stdout, capture_output=True, timeout=480)
             if src.stdout:
                 src.stdout.close()
             src.wait(timeout=60)
         except (OSError, subprocess.SubprocessError):
+            rmdir_if_empty(local)
             return False
         if dst.returncode != 0:
+            rmdir_if_empty(local)
             return False
-        try:
-            next(local.iterdir())
-        except StopIteration:
-            return False
-        except OSError:
+        if not dir_nonempty(local):
+            rmdir_if_empty(local)
             return False
         return True
 
+    def _adb_pull_to(self, remote: str, dest: str, timeout: int
+                     ) -> subprocess.CompletedProcess:
+        return self.run("pull", "-a", remote, dest, timeout=timeout)
+
     def _pull_once(self, remote: str, local: Path,
-                   verify: bool = True) -> Tuple[bool, str]:
-        local.parent.mkdir(parents=True, exist_ok=True)
-        if _want_tar_stream(remote) and self._is_remote_dir(remote) \
+                   verify: bool = True, timeout: int = 180) -> Tuple[bool, str]:
+        """Pull *remote* to *local* without nesting and without MAX_PATH deaths.
+
+        ``adb pull /sdcard/foo C:\\...\\foo`` nests a second ``foo`` when the
+        destination directory already exists (even if it is empty). Tar-stream
+        attempts mkdir the dest first; if they fail we must remove that empty
+        folder before falling through to ``adb pull``.
+        """
+        ensure_dir(local.parent)
+        is_dir = self._is_remote_dir(remote)
+        if _want_tar_stream(remote) and is_dir \
                 and self._pull_tar_stream(remote, local):
             return True, "ok-tar"
-        proc = self.run("pull", "-a", remote, str(local), timeout=14400)
+        # Tar may have left an empty dest dir — delete it or adb will nest.
+        rmdir_if_empty(local)
+
+        eff_timeout = 480 if is_dir else max(45, timeout)
+        stage: Path | None = None
+        pull_target = local
+        if (is_dir and dir_nonempty(local)) or path_too_long_for_win32(local):
+            stage = make_short_stage()
+            pull_target = stage / (local.name or "payload")
+
+        proc = self._adb_pull_to(remote, host_fs_path(pull_target), eff_timeout)
+        if proc.returncode != 0 and is_win_path_error(proc.stderr or "") \
+                and stage is None:
+            stage = make_short_stage()
+            pull_target = stage / (local.name or "payload")
+            proc = self._adb_pull_to(
+                remote, host_fs_path(pull_target), eff_timeout)
+
         if proc.returncode != 0:
             if self.has_root:
                 staged = f"/data/local/tmp/argus_{abs(hash(remote)) % 10**8}"
                 self.shell(f"su -c 'cp -r {shlex.quote(remote)} {staged} && "
                            f"chmod -R 644 {staged}'")
-                proc = self.run("pull", "-a", staged, str(local))
+                retry_dest = host_fs_path(pull_target)
+                proc = self.run("pull", "-a", staged, retry_dest)
                 self.shell(f"su -c 'rm -rf {staged}'")
                 if proc.returncode != 0:
-                    return False, proc.stderr.strip()[:200]
+                    if stage is not None:
+                        shutil.rmtree(stage, ignore_errors=True)
+                    return False, (proc.stderr or "").strip()[:200]
             else:
-                return False, proc.stderr.strip()[:200] or "permission denied"
+                if stage is not None:
+                    shutil.rmtree(stage, ignore_errors=True)
+                return False, (proc.stderr or "").strip()[:200] or "permission denied"
+
+        if stage is not None:
+            try:
+                relocate_tree(pull_target, local)
+            finally:
+                shutil.rmtree(stage, ignore_errors=True)
 
         if verify and local.is_file():
             remote_hash = self.remote_sha256(remote)
@@ -406,9 +752,15 @@ def pull_filesystem(session: AdbSession, dest: Path,
                     skip_existing: bool = False,
                     verify: bool = True,
                     parallel: int = 1,
-                    vendor_paths: Optional[List[Tuple[str, str]]] = None
+                    vendor_paths: Optional[List[Tuple[str, str]]] = None,
+                    file_timeout: int = 180,
+                    skip_shared_media: bool = False,
                     ) -> PullResult:
-    """File-system action: pull databases and media, with WAL sidecars."""
+    """File-system action: pull databases and media, with WAL sidecars.
+
+    Enhanced: per-file timeout (default 180s) propagated to AdbSession.pull,
+    parallel integrity verification, and WAL sidecar batching.
+    """
     result = PullResult()
     targets = [(p, c) for p, c in FS_TARGETS
                if not categories or c in categories]
@@ -445,7 +797,23 @@ def pull_filesystem(session: AdbSession, dest: Path,
         else:
             targets = [(p, c) for p, c in targets if p != "/storage/emulated/0"]
 
+    targets = filter_shared_media_targets(targets, skip=skip_shared_media)
+    targets = dedupe_pull_targets(targets)
+
+    if skip_shared_media and log:
+        log("adb.filesystem", "note",
+            "Shared media already taken via MTP — ADB overlay keeps "
+            "Databases/Backups/crypt and skips DCIM/WhatsApp Video re-copy")
+
     if not session.has_root:
+        root_only = [p for p, _ in targets if needs_root(p)]
+        if root_only:
+            targets = [(p, c) for p, c in targets if not needs_root(p)]
+            result.skipped.extend(root_only)
+            if log:
+                log("adb.filesystem", "note",
+                    f"Skipping {len(root_only)} root-only path(s) without probing "
+                    "(/data/data is unreadable).")
         if log:
             log("adb.filesystem", "warning",
                 "Device is not rooted — /data/data is unreadable. Only shared "
@@ -453,13 +821,19 @@ def pull_filesystem(session: AdbSession, dest: Path,
                 "limited to what is present in shared storage.",
                 level="warning")
 
+    kinds = session.classify_paths([p for p, _ in targets])
+
     total = len(targets)
-    workers = max(1, min(parallel, total or 1))
+    workers = max(1, min(3, parallel, total or 1))
 
     def pull_target(index: int, remote: str, category: str) -> PullResult:
         partial = PullResult()
         sess = session if workers <= 1 else AdbSession(session.serial)
-        if not sess.exists(remote):
+        if workers > 1:
+            sess._kind_cache = dict(session._kind_cache)
+            sess._root = session._root
+        kind = kinds.get(remote, "N")
+        if kind == "N":
             partial.skipped.append(remote)
             if log:
                 log("adb.filesystem", "skipped", f"{remote} not present",
@@ -470,6 +844,16 @@ def pull_filesystem(session: AdbSession, dest: Path,
         local = dest / remote.lstrip("/")
         if skip_existing and local.exists():
             size = _tree_size(local)
+            if local.is_dir() and dir_nonempty(local):
+                partial.skipped.append(remote)
+                partial.bytes_total += size
+                if log:
+                    log("adb.filesystem", "skipped",
+                        f"already on disk {remote} (resume)",
+                        phase="transfer",
+                        progress_current=index, progress_total=total,
+                        progress_pct=round(100.0 * index / total, 1))
+                return partial
             if local.is_file() and not verify:
                 partial.pulled.append(remote)
                 partial.bytes_total += size
@@ -493,7 +877,11 @@ def pull_filesystem(session: AdbSession, dest: Path,
                             progress_current=index, progress_total=total,
                             progress_pct=round(100.0 * index / total, 1))
                     return partial
-        ok, msg = sess.pull(remote, local, verify=verify, log=log)
+        try:
+            ok, msg = sess.pull(remote, local, verify=verify,
+                                file_timeout=file_timeout, log=log)
+        except (AcquisitionError, OSError) as exc:
+            ok, msg = False, str(exc)[:200]
         if ok:
             partial.pulled.append(remote)
             size = _tree_size(local)
@@ -509,7 +897,7 @@ def pull_filesystem(session: AdbSession, dest: Path,
                     if not sess.exists(sc):
                         return None
                     sok, _ = sess.pull(sc, Path(str(local) + suffix),
-                                       verify=verify)
+                                       verify=verify, file_timeout=file_timeout)
                     if sok:
                         if log:
                             log("adb.filesystem", "ok",
@@ -548,7 +936,14 @@ def pull_filesystem(session: AdbSession, dest: Path,
                 pool.submit(pull_target, index, remote, category)
                 for index, (remote, category) in enumerate(targets, start=1)]
             for fut in as_completed(futures):
-                merge_partial(fut.result())
+                try:
+                    merge_partial(fut.result())
+                except Exception as exc:
+                    result.failed.append(str(exc)[:200])
+                    if log:
+                        log("adb.filesystem", "warning",
+                            f"Worker recovered: {type(exc).__name__}: {exc}",
+                            level="warning")
     else:
         for index, (remote, category) in enumerate(targets, start=1):
             merge_partial(pull_target(index, remote, category))
@@ -654,17 +1049,30 @@ def comprehensive_acquire(session: AdbSession, dest: Path,
                           vendor_fs: Optional[List[Tuple[str, str]]] = None,
                           vendor_comm: Optional[List[Tuple[str, str]]] = None,
                           vendor_providers: Optional[List[Tuple[str, str, str]]]
-                          = None) -> PullResult:
-    """Multi-pass god-level acquisition: logical, apps, filesystem, comms."""
+                          = None,
+                          file_timeout: int = 180,
+                          god: bool = False,
+                          skip_shared_media: bool = False) -> PullResult:
+    """God-level 9-pass acquisition: logical, apps, filesystem, comms, dumpsys,
+    shared crypt, root trees, live state, APKs — with vendor overlays.
+
+    file_timeout propagated to all pulls (180 default, 300 god). god=True forces
+    every pass even when turbo would skip, and adds deep crypt/vendor passes.
+    """
     from .android_apps import discover_app_databases
 
     overall = PullResult()
     overall.passes = []
-    total_passes = 7 if not skip_app_discovery else 5
+    # god forces 9 passes even if skip_app_discovery would trim to 5
+    if god:
+        total_passes = 9
+    else:
+        total_passes = 7 if not skip_app_discovery else 5
     pass_no = 1
     if log:
         log("adb.comprehensive", "progress",
-            f"Pass {pass_no}/{total_passes} — logical content-provider query",
+            f"Pass {pass_no}/{total_passes} — logical content-provider query"
+            + (" [GOD]" if god else ""),
             phase="transfer", progress_current=0, progress_total=total_passes)
 
     logical = logical_query(session, dest / "logical", categories, log=log,
@@ -711,11 +1119,20 @@ def comprehensive_acquire(session: AdbSession, dest: Path,
             phase="transfer", progress_current=pass_no - 1,
             progress_total=total_passes)
 
-    filesystem = pull_filesystem(session, dest / "filesystem", categories,
-                                   extra_paths=extra, log=log,
-                                   skip_existing=skip_existing,
-                                   verify=verify, parallel=parallel,
-                                   vendor_paths=vendor_fs)
+    try:
+        filesystem = pull_filesystem(session, dest / "filesystem", categories,
+                                       extra_paths=extra, log=log,
+                                       skip_existing=skip_existing,
+                                       verify=verify, parallel=parallel,
+                                       vendor_paths=vendor_fs,
+                                       file_timeout=file_timeout,
+                                       skip_shared_media=skip_shared_media)
+    except Exception as exc:
+        if log:
+            log("adb.comprehensive", "warning",
+                f"Filesystem pass recovered: {type(exc).__name__}: {exc}",
+                level="warning")
+        filesystem = PullResult(failed=[str(exc)[:200]])
     overall.passes.append("filesystem")
     _merge_pull(overall, filesystem)
 
@@ -749,10 +1166,18 @@ def comprehensive_acquire(session: AdbSession, dest: Path,
             progress_total=total_passes)
     crypt_paths = [] if skip_app_discovery else discover_shared_crypt(
         session, log=log)
-    shared = pull_shared_app_trees(
-        session, dest / "shared", log=log,
-        skip_existing=skip_existing, verify=verify,
-        extra_paths=crypt_paths)
+    try:
+        shared = pull_shared_app_trees(
+            session, dest / "shared", log=log,
+            skip_existing=skip_existing, verify=verify,
+            extra_paths=crypt_paths,
+            skip_shared_media=skip_shared_media)
+    except Exception as exc:
+        if log:
+            log("adb.comprehensive", "warning",
+                f"Shared-tree pass recovered: {type(exc).__name__}: {exc}",
+                level="warning")
+        shared = PullResult(failed=[str(exc)[:200]])
     if shared.pulled:
         overall.passes.append("shared")
         _merge_pull(overall, shared)
@@ -842,6 +1267,11 @@ def logical_query(session: AdbSession, dest: Path,
     """Logical action: query content providers and save the raw dumps."""
     result = PullResult()
     dest.mkdir(parents=True, exist_ok=True)
+    try:
+        from .android_comms import grant_comms_runtime
+        grant_comms_runtime(session, log=log)
+    except Exception:
+        pass
     if providers_only:
         work = [(key, uri, category) for key, uri, category in providers_only
                 if not categories or category in categories]
@@ -865,6 +1295,18 @@ def logical_query(session: AdbSession, dest: Path,
 
     def _query_one(item: tuple) -> PullResult:
         key, uri, category = item
+        try:
+            return _query_one_inner(key, uri, category)
+        except Exception as exc:
+            partial = PullResult()
+            partial.skipped.append(uri)
+            if log:
+                log("adb.logical", "skipped",
+                    f"{uri}: {type(exc).__name__}: {str(exc)[:160]}",
+                    phase="transfer")
+            return partial
+
+    def _query_one_inner(key: str, uri: str, category: str) -> PullResult:
         partial = PullResult()
         target = dest / "content" / f"{key}.txt"
         if skip_existing and target.is_file():
@@ -891,12 +1333,24 @@ def logical_query(session: AdbSession, dest: Path,
         uris = [uri] + _PROVIDER_FALLBACKS.get(key, [])
         out = ""
         used = uri
-        timeout = 600 if category == "Messages" else 240
+        comms = category in ("Messages", "Contacts", "Calls", "Chats")
+        timeout = 45 if comms else 20
+        projection = _QUERY_PROJECTIONS.get(key, "*")
         for candidate in uris:
-            out = _content_query_paginated(sess, candidate, timeout=timeout)
-            if out.strip() and "Error" not in out[:200] and "Row:" in out:
+            try:
+                out = _content_query_paginated(
+                    sess, candidate, timeout=timeout, projection=projection)
+            except AcquisitionError:
+                out = ""
+            if (out.strip() and "Error" not in out[:200]
+                    and "Permission Denial" not in out[:300]
+                    and "Row:" in out):
                 used = candidate
                 break
+            # Media providers: empty means empty. Comms: try OEM aliases.
+            if not comms:
+                if "Row:" not in (out or "") and "Error" not in (out or "")[:80]:
+                    break
         if not out.strip() or "Error" in out[:200]:
             partial.skipped.append(uri)
             partial.provider_stats.append({
@@ -1022,48 +1476,61 @@ def create_backup(session: AdbSession, dest: Path,
 
 
 def _tree_size(path: Path) -> int:
-    if path.is_file():
-        try:
-            return path.stat().st_size
-        except OSError:
-            return 0
-    total = 0
-    for p in path.rglob("*"):
-        if p.is_file():
-            try:
-                total += p.stat().st_size
-            except OSError:
-                pass
-    return total
+    return tree_bytes(path)
+
+
+def _content_query_ok(text: str) -> bool:
+    t = (text or "").strip()
+    if not t or "Row:" not in t:
+        return False
+    head = t[:320]
+    if "Error" in head or "Permission Denial" in head:
+        return False
+    return True
 
 
 def _content_query_paginated(sess: AdbSession, uri: str,
                              *, batch_size: int = 500,
                              max_rows: int = 50000,
-                             timeout: int = 240) -> str:
-    """Query a content provider with pagination when supported."""
+                             timeout: int = 240,
+                             projection: str = "*") -> str:
+    """Query a content provider with pagination, projection, and user 0."""
+    projection = projection or "*"
     chunks: List[str] = []
     offset = 0
+
+    def _run(cmd: str) -> str:
+        try:
+            return sess.shell(cmd, timeout=timeout) or ""
+        except Exception:
+            return ""
+
     while offset < max_rows:
-        cmd = (f"content query --uri {uri} --projection * "
-               f"--limit {batch_size} --offset {offset}")
-        chunk = sess.shell(cmd, timeout=timeout)
-        if not chunk.strip() or "Error" in chunk[:200]:
-            if offset == 0:
-                plain = sess.shell(f"content query --uri {uri}", timeout=timeout)
-                if plain.strip() and "Row:" in plain:
-                    return plain
-                return sess.shell(
-                    f"content query --uri {uri} --projection *", timeout=timeout)
+        cmd = (
+            f"content query --uri {uri} --user 0 --projection {projection} "
+            f"--limit {batch_size} --offset {offset}")
+        chunk = _run(cmd)
+        if not _content_query_ok(chunk):
             break
-        if "Row:" not in chunk:
-            break
-        rows = chunk.count("Row:")
         chunks.append(chunk)
+        rows = chunk.count("Row:")
         if rows < batch_size:
             break
         offset += batch_size
-    return "\n".join(chunks)
+    if chunks:
+        return "\n".join(chunks)
+
+    variants = [
+        f"content query --uri {uri} --user 0 --projection {projection}",
+        f"content query --uri {uri} --projection {projection}",
+        f"content query --uri {uri}",
+    ]
+    last = ""
+    for cmd in variants:
+        last = _run(cmd)
+        if _content_query_ok(last):
+            return last
+    return last
 
 
 def get_device_state(serial: str) -> str:

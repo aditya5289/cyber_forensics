@@ -52,3 +52,27 @@ class TestAndroidCommsModule(unittest.TestCase):
         self.assertIn("contacts", keys)
         self.assertIn("calls", keys)
         self.assertIn("mms_part", keys)
+        self.assertIn("samsung_sms", keys)
+        self.assertIn("icc_adn", keys)
+        self.assertIn("sec_calls", keys)
+        self.assertIn("voicemail", keys)
+
+    def test_default_sms_package_parses_role(self) -> None:
+        from argus.acquire.android_comms import default_sms_package
+        session = type("S", (), {})()
+        session.shell = lambda *a, **k: (
+            "android.app.role.SMS:\n  holders: com.samsung.android.messaging\n")
+        self.assertEqual(default_sms_package(session),
+                         "com.samsung.android.messaging")
+
+    def test_grant_comms_runtime_is_idempotent(self) -> None:
+        from argus.acquire import android_comms
+        android_comms._GRANTED_SERIALS.clear()
+        calls = []
+        session = type("S", (), {})()
+        session.serial = "R5CT00TEST"
+        session.shell = lambda *a, **k: calls.append(a) or ""
+        android_comms.grant_comms_runtime(session)
+        android_comms.grant_comms_runtime(session)
+        self.assertEqual(len(calls), 1)
+        self.assertIn("READ_SMS", calls[0][0])

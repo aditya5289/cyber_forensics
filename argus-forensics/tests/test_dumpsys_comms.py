@@ -38,6 +38,59 @@ class TestDumpsysComms(unittest.TestCase):
             self.assertGreaterEqual(len(res.artifacts), 1)
             self.assertIsNotNone(res.artifacts[0].latitude)
 
+    def test_telecom_call_block(self) -> None:
+        with tempfile.TemporaryDirectory() as td:
+            root = Path(td)
+            path = root / "dumpsys" / "telecom.txt"
+            path.parent.mkdir(parents=True)
+            path.write_text(
+                "Call 0: TC@5\n"
+                "\thandle: tel:+15551212999\n"
+                "\tstate: DISCONNECTED\n"
+                "\tisIncoming: true\n"
+                "\tconnectTimeMillis: 1700000000000\n"
+                "\tdisconnectTimeMillis: 1700000012000\n",
+                encoding="utf-8")
+            ctx = ParseContext(evidence_root=root, platform="android")
+            res = parse_dumpsys(path, ctx)
+            self.assertGreaterEqual(len(res.artifacts), 1)
+            self.assertEqual(res.artifacts[0].category.value, "Calls")
+            self.assertIn("5551212999", res.artifacts[0].body.replace(" ", ""))
+
+    def test_messaging_notification(self) -> None:
+        with tempfile.TemporaryDirectory() as td:
+            root = Path(td)
+            path = root / "dumpsys" / "notification.txt"
+            path.parent.mkdir(parents=True)
+            path.write_text(
+                "NotificationRecord(0x1)\n"
+                "  opPkg=com.samsung.android.messaging uid=10123\n"
+                "  when=1700000000000\n"
+                "  extras={\n"
+                "    android.title=Mom\n"
+                "    android.text=Call me when you land\n"
+                "  }\n",
+                encoding="utf-8")
+            ctx = ParseContext(evidence_root=root, platform="android")
+            res = parse_dumpsys(path, ctx)
+            self.assertGreaterEqual(len(res.artifacts), 1)
+            self.assertEqual(res.artifacts[0].category.value, "Messages")
+            self.assertIn("Call me when you land", res.artifacts[0].body)
+
+    def test_subscription_msisdn(self) -> None:
+        with tempfile.TemporaryDirectory() as td:
+            root = Path(td)
+            path = root / "dumpsys" / "isub.txt"
+            path.parent.mkdir(parents=True)
+            path.write_text(
+                "SubscriptionInfo: id=1 iccId=89014103211118510720 "
+                "number=+15550001999 displayName=Jio\n",
+                encoding="utf-8")
+            ctx = ParseContext(evidence_root=root, platform="android")
+            res = parse_dumpsys(path, ctx)
+            kinds = {a.subtype for a in res.artifacts}
+            self.assertTrue("Subscriber number" in kinds or "SIM ICCID" in kinds)
+
 
 if __name__ == "__main__":
     unittest.main()

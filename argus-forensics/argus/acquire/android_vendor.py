@@ -100,6 +100,10 @@ _VENDOR_COMM: Dict[str, List[PathEntry]] = {
     "samsung": [
         ("/sdcard/SmartSwitch", "Other"),
         ("/sdcard/Samsung/backup", "Other"),
+        ("/sdcard/Samsung/Messages", "Messages"),
+        ("/sdcard/Samsung/Messaging", "Messages"),
+        ("/sdcard/Android/data/com.samsung.android.messaging", "Messages"),
+        ("/sdcard/Android/data/com.samsung.android.dialer", "Calls"),
     ],
     "xiaomi": [
         ("/sdcard/MIUI/backup", "Other"),
@@ -145,6 +149,11 @@ _PROVIDER_EXTRAS: Dict[str, List[Tuple[str, str, str]]] = {
     "samsung": [
         ("mms_part", "content://mms/part", "Messages"),
         ("sec_calls", "content://logs/calls", "Calls"),
+        ("sec_call", "content://logs/call", "Calls"),
+        ("samsung_sms", "content://com.samsung.android.messaging/sms", "Messages"),
+        ("samsung_msg", "content://com.samsung.android.messaging/message", "Messages"),
+        ("samsung_dialer", "content://com.samsung.android.dialer/calls", "Calls"),
+        ("icc_adn", "content://icc/adn", "Contacts"),
     ],
     "xiaomi": [
         ("mms_part", "content://mms/part", "Messages"),

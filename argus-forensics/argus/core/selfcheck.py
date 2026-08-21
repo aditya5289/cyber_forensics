@@ -23,11 +23,14 @@ gets ignored — which is how a genuine mismatch gets missed.
 
 from __future__ import annotations
 
+import concurrent.futures
 import hashlib
 import json
+import os
 import platform
 import sys
 from dataclasses import dataclass, field
+from functools import lru_cache
 from pathlib import Path
 from typing import Any, Dict, List, Optional, Tuple
 
@@ -73,9 +76,29 @@ def build_manifest(root: Optional[Path] = None) -> Dict[str, Any]:
     a manifest built on one platform verifies on another."""
     root = Path(root or PACKAGE_ROOT)
     files: Dict[str, str] = {}
-    for path in _iter_source_files(root):
-        files[path.relative_to(root).as_posix()] = _digest(path)
+    source_files = _iter_source_files(root)
 
+    # Parallel hashing with ThreadPoolExecutor — IO-bound, GIL released in
+    # hashlib / file I/O. Fallback to sequential on any executor failure.
+    if source_files:
+        try:
+            max_workers = min(32, (os.cpu_count() or 4) * 2, len(source_files))
+            # ThreadPoolExecutor is optimal for IO-bound hashing; bounded
+            # workers avoid thread explosion on large trees.
+            with concurrent.futures.ThreadPoolExecutor(max_workers=max_workers) as executor:
+                future_to_path = {
+                    executor.submit(_digest, path): path for path in source_files
+                }
+                for future in concurrent.futures.as_completed(future_to_path):
+                    path = future_to_path[future]
+                    rel = path.relative_to(root).as_posix()
+                    files[rel] = future.result()
+        except Exception:
+            # Fallback: sequential hashing guarantees correctness even if
+            # threading is unavailable or filesystem is unstable.
+            files.clear()
+            for path in source_files:
+                files[path.relative_to(root).as_posix()] = _digest(path)
     # A single digest over the sorted (path, hash) pairs identifies the build.
     roll = hashlib.sha256()
     for name in sorted(files):
@@ -142,10 +165,16 @@ class VerificationResult:
                 + ", ".join(bits) + ".")
 
 
+@lru_cache(maxsize=32)
 def verify_installation(root: Optional[Path] = None,
                         manifest_path: Optional[Path] = None
                         ) -> VerificationResult:
-    """Compare the installed tree against the manifest recorded at release."""
+    """Compare the installed tree against the manifest recorded at release.
+
+    Cached via ``lru_cache`` — repeated calls (e.g. report() → verify →
+    installation_id) avoid re-hashing the entire tree. Cache key is
+    (root, manifest_path); mutate the tree and call ``verify_installation.cache_clear()``.
+    """
     root = Path(root or PACKAGE_ROOT)
     manifest_path = Path(manifest_path or (root / "MANIFEST.json"))
 

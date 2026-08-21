@@ -37,7 +37,7 @@ MMS_BOX = {
     name="android.sms",
     patterns=["mmssms.db", "messages.db", "telephony.db", "bugle_db"],
     platform="android", priority=80,
-    probe=any_table_probe(("sms",), ("pdu",), ("messages", "parts")),
+    probe=any_table_probe(("sms",), ("pdu",), ("messages", "parts"), ("messages",), ("message",)),
     description="Android SMS and MMS store",
 )
 def parse(path: Path, ctx: ParseContext) -> ParseResult:
@@ -82,6 +82,44 @@ def parse(path: Path, ctx: ParseContext) -> ParseResult:
                 res.artifacts.append(art)
                 if recovery != Recovery.ALLOCATED:
                     res.deleted_recovered += 1
+
+        # Samsung Messages / OEM stores a `messages` table without bugle `parts`.
+        if not sms_table:
+            oem_table = db.first_table("messages", "message")
+            if oem_table and not db.has_table("parts"):
+                app_name = ("Samsung Messages"
+                            if "samsung" in path.as_posix().lower()
+                            else "Android Messaging")
+                for row, recovery, conf in rows_with_deleted(db, oem_table, ctx):
+                    ts = guess(pick(row, "date", "date_sent", "created_at"),
+                               "date")
+                    if not ctx.in_span(ts):
+                        continue
+                    box = as_int(pick(row, "type", "msg_type", "message_type")) or 0
+                    direction, subtype = SMS_BOX.get(
+                        box, (Direction.UNKNOWN, "SMS"))
+                    number = clean_number(pick(row, "address", "recipient",
+                                               "sender"))
+                    body = as_text(pick(row, "body", "text", "content",
+                                        default=""))
+                    art = Artifact(
+                        category=Category.MESSAGE, subtype=subtype,
+                        timestamp=ts, direction=direction, body=body,
+                        app=app_name, source_path=ctx.rel(path),
+                        source_table=oem_table,
+                        source_row=as_int(row.get("_rowid") or row.get("_id")),
+                        recovery=recovery, confidence=conf,
+                        attributes={
+                            "thread_id": as_int(pick(row, "thread_id")),
+                            "read": as_int(pick(row, "read")),
+                        },
+                    )
+                    _attach_parties(art, ctx, number,
+                                    as_text(pick(row, "creator", default="")),
+                                    direction)
+                    res.artifacts.append(art)
+                    if recovery != Recovery.ALLOCATED:
+                        res.deleted_recovered += 1
 
         # ------------------------------------------------------------- MMS
         pdu_table = db.first_table("pdu")

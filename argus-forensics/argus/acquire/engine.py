@@ -37,7 +37,7 @@ from ..parsers.registry import ParseContext, dispatch, load_all
 from ..parsers.timestamps import span_to_range
 from . import android_adb, android_backup, ios_backup
 from .filesystem import ingest_tree
-from .progress import ProgressMeter
+from .progress import ProgressMeter, human_bytes
 
 ALL_CATEGORIES = [c.value for c in Category]
 
@@ -77,6 +77,8 @@ class AcquisitionPlan:
     ingest_workers: Optional[int] = None
     fast_seal: bool = False
     physical_full: bool = False
+    file_timeout: int = 180  # per-file ADB/MTP timeout seconds — enhanced acquisition
+    god: bool = False        # god-level: maximum thoroughness + parallelism
 
     def validate(self) -> None:
         if not self.operator:
@@ -127,12 +129,49 @@ from ..core.resume import INCOMPLETE_MARKER, find_incomplete, open_for_resume
 
 
 def apply_performance_settings(plan: AcquisitionPlan) -> None:
-    """Baseline parallelism applied to every extraction."""
+    """God-level default: thorough + fast — no depth traded for speed.
+
+    Keeps verification, deleted recovery and app discovery enabled; uses maximum
+    safe parallelism (USB-safe) and streams hashes locally. This is the
+    lab-manual Steps 8–13 gold standard.
+    """
     import os
     cpu = os.cpu_count() or 4
     if plan.ingest_workers is None:
-        plan.ingest_workers = max(8, min(24, cpu * 2))
-    plan.parallel_pulls = max(plan.parallel_pulls, min(16, cpu * 2))
+        plan.ingest_workers = max(16, min(32, cpu * 3))
+    # USB is one bus — 4-8 parallel ADB pulls is ceiling; MTP uses 3 Shell workers
+    plan.parallel_pulls = max(plan.parallel_pulls, min(8, max(4, cpu)))
+    plan.verify_pulls = True
+    plan.skip_device_report = False
+    plan.skip_app_discovery = False
+    plan.skip_perceptual_hash = False
+    plan.recover_deleted = True
+    if plan.file_timeout < 180:
+        plan.file_timeout = 180
+
+
+def apply_god_settings(plan: AcquisitionPlan) -> None:
+    """Explicit --god / --method comprehensive preset — absolute maximum."""
+    import os
+    cpu = os.cpu_count() or 4
+    if plan.method in ("comprehensive", "god"):
+        plan.method = "comprehensive"
+    # Crank ingest to ceiling, keep every forensic pass
+    if plan.ingest_workers is None:
+        plan.ingest_workers = max(24, min(32, cpu * 4))
+    else:
+        plan.ingest_workers = max(plan.ingest_workers, 24)
+    plan.parallel_pulls = max(plan.parallel_pulls, min(12, cpu * 2))
+    plan.file_timeout = max(plan.file_timeout, 300)
+    plan.verify_pulls = True
+    plan.recover_deleted = True
+    plan.skip_app_discovery = False
+    plan.skip_device_report = False
+    plan.skip_perceptual_hash = False
+    plan.skip_blob_store = False
+    plan.skip_content_sniff = False
+    plan.fast_seal = False
+    plan.keep_raw = True
 
 
 def apply_turbo_settings(plan: AcquisitionPlan) -> None:
@@ -191,6 +230,44 @@ def _clear_incomplete(container: EvidenceContainer) -> None:
     target = container.path / INCOMPLETE_MARKER
     if target.exists():
         target.unlink()
+
+
+def verify_acquisition(container_path: Path | str) -> dict:
+    """Post-acquisition verification — re-hashes manifests vs disk.
+
+    Checks both MTP (argus-mtp-manifest.json) and ADB (argus-adb-manifest.json)
+    manifests where present. Returns unified dict with per-manifest results.
+    """
+    container_path = Path(container_path)
+    raw = container_path / "raw" if (container_path / "raw").is_dir() else container_path
+    results: dict = {"ok": True, "manifests": {}}
+    for name, sub in [("mtp", raw / "argus-mtp-manifest.json"),
+                     ("mtp_shared", raw / "mtp_shared" / "argus-mtp-manifest.json"),
+                     ("adb", raw / "argus-adb-manifest.json"),
+                     ("adb2", raw / "adb" / "argus-adb-manifest.json")]:
+        if sub.is_file():
+            try:
+                from .mtp import verify_manifest as _verify_mtp
+                v = _verify_mtp(sub, root=sub.parent)
+                results["manifests"][name] = v
+                if not v.get("ok"):
+                    results["ok"] = False
+            except Exception as exc:
+                results["manifests"][name] = {"ok": False, "error": str(exc)}
+                results["ok"] = False
+    # also walk raw for any manifest-named files
+    for m in raw.rglob("argus-*-manifest.json"):
+        key = m.relative_to(raw).as_posix()
+        if key not in results["manifests"]:
+            try:
+                from .mtp import verify_manifest as _verify_mtp
+                v = _verify_mtp(m, root=m.parent)
+                results["manifests"][key] = v
+                if not v.get("ok"):
+                    results["ok"] = False
+            except Exception as exc:
+                results["manifests"][key] = {"ok": False, "error": str(exc)}
+    return results
 
 
 class AcquisitionEngine:
@@ -322,6 +399,9 @@ class AcquisitionEngine:
     def run(self, plan: AcquisitionPlan,
             device: Optional[DetectedDevice] = None) -> AcquisitionReport:
         plan.validate()
+        # god takes precedence over turbo — both apply performance baseline first
+        if getattr(plan, "god", False) or plan.method in ("comprehensive", "god"):
+            apply_god_settings(plan)
         apply_performance_settings(plan)
         apply_turbo_settings(plan)
 
@@ -467,6 +547,25 @@ class AcquisitionEngine:
                                      or plan.backup_password or ""))
             container.update_extraction(preprocess_summary=preprocess)
             self._decode(plan, container, raw_root, report, resumed=resumed)
+            # post-acquisition manifest verification (enhanced acquisition §7 precaution 5)
+            try:
+                vres = verify_acquisition(container.path)
+                if vres.get("manifests"):
+                    for name, mv in vres["manifests"].items():
+                        if not mv.get("ok"):
+                            msg = (f"Post-acquisition verify {name}: "
+                                   f"altered={mv['counts'].get('altered',0)} "
+                                   f"missing={mv['counts'].get('missing',0)} "
+                                   f"added={mv['counts'].get('added',0)}")
+                            report.integrity_failures.append(msg)
+                            report.warnings.append(msg)
+                            self._log(container, "verify", "error", msg, level="error")
+                        elif mv.get("counts", {}).get("unchanged", 0) > 0:
+                            self._log(container, "verify", "ok",
+                                      f"Manifest {name}: {mv['counts']['unchanged']} file(s) verified")
+            except Exception as exc:
+                self._log(container, "verify", "warning",
+                          f"Post-verify skipped: {exc}", level="warning")
         except AcquisitionError as exc:
             report.status = "Failed"
             report.warnings.append(str(exc))
@@ -751,7 +850,7 @@ class AcquisitionEngine:
                     label, raw_root,
                     progress=lambda msg, **extra: log(
                         "mtp", "progress", msg, **extra),
-                    hash_files=plan.verify_pulls and not plan.turbo,
+                    hash_files=not plan.turbo,
                     resume=resumed,
                     turbo=plan.turbo)
                 report.files_acquired += mtp_result.files_copied
@@ -786,23 +885,37 @@ class AcquisitionEngine:
                         "(enable Developer options → USB debugging, then re-run "
                         "with ADB) or an on-device backup app export.",
                         level="warning")
-                serial = android_adb.wait_for_authorized_adb(log, timeout=300)
+                serial = android_adb.wait_for_authorized_adb(log, timeout=40)
                 if serial:
                     log("adb", "ok",
                         "USB debugging authorised during MTP — running "
                         "comprehensive overlay (logical, apps, filesystem, APKs)")
                     overlay_session = android_adb.AdbSession(serial)
-                    overlay = android_adb.comprehensive_acquire(
-                        overlay_session, raw_root / "adb", plan.categories, log,
-                        skip_existing=resumed or plan.turbo,
-                        verify=plan.verify_pulls,
-                        parallel=plan.parallel_pulls,
-                        skip_app_discovery=plan.skip_app_discovery)
+                    android_adb.enable_keep_awake(overlay_session, log=log)
+                    try:
+                        overlay = android_adb.comprehensive_acquire(
+                            overlay_session, raw_root / "adb", plan.categories, log,
+                            skip_existing=True,
+                            verify=plan.verify_pulls,
+                            parallel=min(4, max(1, plan.parallel_pulls)),
+                            skip_app_discovery=plan.skip_app_discovery,
+                            file_timeout=plan.file_timeout,
+                            skip_shared_media=True, god=plan.god)
+                    except Exception as exc:
+                        log("adb.comprehensive", "warning",
+                            "ADB overlay hit a host/device error and continued "
+                            f"with what had already landed: {type(exc).__name__}: "
+                            f"{exc}",
+                            level="warning")
+                        overlay = android_adb.PullResult()
                     report.files_acquired += len(overlay.pulled)
                     report.bytes_acquired += overlay.bytes_total
-                    android_adb.write_adb_manifest(
-                        raw_root / "adb", overlay, method="comprehensive",
-                        serial=serial)
+                    try:
+                        android_adb.write_adb_manifest(
+                            raw_root / "adb", overlay, method="comprehensive",
+                            serial=serial)
+                    except OSError:
+                        pass
                 log("mtp", "ok",
                     f"Copied {mtp_result.files_copied} of "
                     f"{mtp_result.files_listed} listed file(s), "
@@ -832,15 +945,16 @@ class AcquisitionEngine:
                         "Turbo identity capture — skipped package/account dumps")
                 pull_kw = dict(
                     categories=plan.categories, log=log,
-                    skip_existing=resumed or plan.turbo,
+                    skip_existing=(resumed or plan.turbo) and not plan.god,
                     verify=plan.verify_pulls,
                     parallel=plan.parallel_pulls,
                     vendor_paths=vendor_fs,
+                    file_timeout=plan.file_timeout,
                 )
                 if plan.method == "logical":
                     res = android_adb.logical_query(
                         session, raw_root, plan.categories, log,
-                        skip_existing=resumed or plan.turbo,
+                        skip_existing=True,
                         extra_providers=vendor_providers)
                 elif plan.method in ("filesystem", "turbo"):
                     res = android_adb.pull_filesystem(session, raw_root, **pull_kw)
@@ -849,7 +963,7 @@ class AcquisitionEngine:
                     phys = android_physical.acquire(
                         session, raw_root / "physical", log=log,
                         full=plan.physical_full,
-                        hash_files=plan.verify_pulls and not plan.turbo,
+                        hash_files=not plan.turbo,
                         resume=resumed,
                         carve=plan.recover_deleted and not plan.turbo)
                     report.notes.extend(phys.notes[:12])
@@ -862,12 +976,13 @@ class AcquisitionEngine:
                     res = phys.as_pull()
                     overlay = android_adb.comprehensive_acquire(
                         session, raw_root, plan.categories, log,
-                        skip_existing=resumed or plan.turbo,
+                        skip_existing=True,
                         verify=plan.verify_pulls,
                         parallel=plan.parallel_pulls,
                         skip_app_discovery=plan.skip_app_discovery,
                         vendor_fs=vendor_fs, vendor_comm=vendor_comm,
-                        vendor_providers=vendor_providers)
+                        vendor_providers=vendor_providers,
+                        file_timeout=plan.file_timeout, god=plan.god)
                     _merge = android_adb.PullResult()
                     for part in (res, overlay):
                         _merge.pulled.extend(part.pulled)
@@ -880,12 +995,13 @@ class AcquisitionEngine:
                 elif plan.method == "comprehensive":
                     res = android_adb.comprehensive_acquire(
                         session, raw_root, plan.categories, log,
-                        skip_existing=resumed or plan.turbo,
+                        skip_existing=True,
                         verify=plan.verify_pulls,
                         parallel=plan.parallel_pulls,
                         skip_app_discovery=plan.skip_app_discovery,
                         vendor_fs=vendor_fs, vendor_comm=vendor_comm,
-                        vendor_providers=vendor_providers)
+                        vendor_providers=vendor_providers,
+                        file_timeout=plan.file_timeout, god=plan.god)
                 elif plan.method == "backup":
                     ab = android_adb.create_backup(session, staging,
                                                    plan.backup_password or "", log)
@@ -896,12 +1012,13 @@ class AcquisitionEngine:
                             level="warning")
                         res = android_adb.comprehensive_acquire(
                             session, raw_root, plan.categories, log,
-                            skip_existing=resumed or plan.turbo,
+                            skip_existing=True,
                             verify=plan.verify_pulls,
                             parallel=plan.parallel_pulls,
                             skip_app_discovery=plan.skip_app_discovery,
                             vendor_fs=vendor_fs, vendor_comm=vendor_comm,
-                            vendor_providers=vendor_providers)
+                            vendor_providers=vendor_providers,
+                            file_timeout=plan.file_timeout, god=plan.god)
                     else:
                         n, warns = android_backup.extract(ab, raw_root,
                                                           plan.backup_password)
@@ -928,7 +1045,7 @@ class AcquisitionEngine:
                         session, raw_root, categories=plan.categories, log=log,
                         vendor_comm_paths=vendor_comm,
                         vendor_providers=vendor_providers,
-                        skip_existing=resumed or plan.turbo)
+                        skip_existing=True)
                     if comms.pulled:
                         report.files_acquired += len(comms.pulled)
                         report.bytes_acquired += comms.bytes_total
@@ -1007,7 +1124,7 @@ class AcquisitionEngine:
         result = mtp.acquire(
             label, dest,
             progress=lambda msg, **extra: log("mtp", "progress", msg, **extra),
-            hash_files=plan.verify_pulls and not plan.turbo,
+            hash_files=not plan.turbo,
             resume=resumed, turbo=plan.turbo)
         report.files_acquired += result.files_copied
         report.bytes_acquired += result.bytes_copied

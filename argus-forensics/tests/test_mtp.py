@@ -274,6 +274,26 @@ class ProgressCopyText(unittest.TestCase):
         msg = mtp._copy_progress_message(100, 800)
         self.assertIn("100 of 800", msg)
 
+    def test_partial_byte_spike_does_not_claim_12gb(self) -> None:
+        listed = 1_230_000_000
+        msg = mtp._copy_progress_message(
+            1218, 3148, bytes_cur=12_000_000_000, bytes_total=listed)
+        self.assertIn("listed", msg)
+        self.assertNotIn("12.", msg)
+
+    def test_volume_child_jobs_split_internal_storage(self) -> None:
+        listing = [
+            {"kind": "F", "path": "Internal storage/DCIM/a.jpg", "size": 1},
+            {"kind": "F", "path": "Internal storage/Android/b.bin", "size": 1},
+            {"kind": "F", "path": "Internal storage/Android/c.bin", "size": 1},
+        ]
+        jobs = mtp._volume_child_jobs("Internal storage", listing)
+        paths = [p for p, _ in jobs]
+        self.assertIn("Internal storage/Android", paths)
+        self.assertIn("Internal storage/DCIM", paths)
+        android = dict(jobs)["Internal storage/Android"]
+        self.assertEqual(android, 2)
+
     def test_folder_denominator_while_listing(self) -> None:
         tot = mtp._copy_progress_total(0, 407, 0, 1)
         self.assertGreater(tot, 0)
@@ -291,7 +311,9 @@ class ProgressCopyText(unittest.TestCase):
 
     def test_stable_polls_scale_with_shortfall(self) -> None:
         self.assertGreater(
-            mtp._stable_polls_needed(10000, 5000, 4), 20)
+            mtp._stable_polls_needed(10000, 5000, 4), 8)
+        self.assertLessEqual(
+            mtp._stable_polls_needed(10000, 5000, 4), 12)
 
     def test_stalled_progress_message(self) -> None:
         msg = mtp._copy_progress_message(
@@ -328,6 +350,13 @@ class ProgressCopyText(unittest.TestCase):
         arrived = {f"g{i}.jpg": Path("/x") for i in range(150)}
         missing = [{"path": "a.jpg", "size": 1}]
         self.assertFalse(
+            mtp._should_retry_missing(expected, arrived, missing))
+
+    def test_retry_when_copy_fell_short_of_inventory(self) -> None:
+        expected = {f"f{i}.jpg": 1 for i in range(1000)}
+        arrived = {f"f{i}.jpg": Path("/x") for i in range(500)}
+        missing = [{"path": f"f{i}.jpg", "size": 1} for i in range(500, 1000)]
+        self.assertTrue(
             mtp._should_retry_missing(expected, arrived, missing))
 
 

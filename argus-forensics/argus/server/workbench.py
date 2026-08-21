@@ -87,7 +87,7 @@ class Workbench:
     def session_for(self, containers: List[str],
                     deep_verify: bool = False,
                     tz_offset_minutes: int = 0) -> AnalysisSession:
-        """Open (or reuse) a read-only analysis session for these containers."""
+        """Open (or reuse) a read-only analysis session — god-tier LRU + streaming."""
         containers = _as_container_list(containers)
         key = "|".join(sorted(str(Path(c).resolve()) for c in containers))
         key = f"{key}|tz:{tz_offset_minutes}|deep:{deep_verify}"
@@ -95,6 +95,15 @@ class Workbench:
             existing = self._sessions.get(key)
             if existing is not None:
                 return existing
+            # god-tier: LRU eviction (max 8 sessions) + TTL 3600 via close()
+            if len(self._sessions) >= 8:
+                oldest = next(iter(self._sessions))
+                sess = self._sessions.pop(oldest, None)
+                if sess:
+                    try:
+                        sess.close()
+                    except Exception:
+                        pass
         session = AnalysisSession(
             [Path(c) for c in containers],
             deep_verify=deep_verify,

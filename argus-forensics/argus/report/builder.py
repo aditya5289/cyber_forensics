@@ -13,6 +13,7 @@ conclusion.
 
 from __future__ import annotations
 
+import concurrent.futures
 import csv
 import html
 import json
@@ -123,16 +124,44 @@ class ReportBuilder:
               ) -> List[Path]:
         out_dir = Path(out_dir)
         out_dir.mkdir(parents=True, exist_ok=True)
-        written: List[Path] = []
-        for fmt in self.options.formats:
-            fmt = fmt.lower().strip()
+        # Normalise once and validate upfront so unsupported formats fail fast
+        # before any thread is spawned (preserves original error semantics).
+        formats = [f.lower().strip() for f in self.options.formats]
+        for fmt in formats:
             if fmt not in FORMATS:
                 raise ReportError(
                     f"unsupported format {fmt!r}; choose from {FORMATS}")
-            target = out_dir / f"{basename}.{fmt}"
-            getattr(self, f"_write_{fmt}")(target)
-            written.append(target)
-        return written
+        if not formats:
+            return []
+        # Pre-warm caches that are lazily computed and not thread-safe on
+        # first access (_tool / _seal). Avoids races when multiple writers
+        # trigger verification hashing simultaneously.
+        if "html" in formats or "pdf" in formats:
+            _ = self._tool  # noqa: F841
+            _ = self._seal  # noqa: F841
+        targets = {fmt: out_dir / f"{basename}.{fmt}" for fmt in formats}
+        # Parallel across formats — each format is independent (CPU + I/O bound
+        # via openpyxl/reportlab/docx). ThreadPoolExecutor preserves isolation;
+        # error handling mirrors serial: first exception is re-raised, wrapped as
+        # ReportError where appropriate, with full traceback.
+        with concurrent.futures.ThreadPoolExecutor(
+            max_workers=min(len(formats), 8)
+        ) as executor:
+            future_to_fmt = {
+                executor.submit(getattr(self, f"_write_{fmt}"), targets[fmt]): fmt
+                for fmt in formats
+            }
+            for future in concurrent.futures.as_completed(future_to_fmt):
+                fmt = future_to_fmt[future]
+                try:
+                    future.result()
+                except ReportError:
+                    raise
+                except Exception as exc:
+                    raise ReportError(f"failed to write {fmt}: {exc}") from exc
+        # Preserve input order in returned list (serial contract) regardless of
+        # completion order.
+        return [targets[fmt] for fmt in formats]
 
     # ------------------------------------------------------------------ JSON
     def _write_json(self, path: Path) -> None:
@@ -473,7 +502,21 @@ class ReportBuilder:
 
     # ------------------------------------------------------------------ HTML
     def _write_html(self, path: Path) -> None:
-        path.write_text(self._html_document(), encoding="utf-8")
+        # Chunked/streaming file write — avoids holding a duplicate giant string
+        # in the write_text codepath and bounds peak memory to chunk size.
+        # Current _html_document() still materialises the full HTML (tens of MB
+        # at most); we stream it to disk in 1 MiB slices so the kernel sees
+        # incremental writes rather than one huge allocation + copy. For
+        # arbitrarily large reports (>100 MB), convert _html_document() to a
+        # generator yielding sections and replace the slice loop with:
+        #   with path.open("w", encoding="utf-8") as fh:
+        #       for chunk in self._html_document_stream():
+        #           fh.write(chunk)
+        html_doc = self._html_document()
+        chunk_size = 1 << 20  # 1 MiB
+        with path.open("w", encoding="utf-8", newline="\n") as fh:
+            for i in range(0, len(html_doc), chunk_size):
+                fh.write(html_doc[i:i + chunk_size])
 
     def _html_method_provenance(self) -> str:
         """What this extraction actually did — not generic boilerplate."""
