@@ -55,6 +55,10 @@ COMMS_PROVIDERS: List[Tuple[str, str, str]] = [
     ("icc_sms", "content://icc/sms", "Messages"),
     ("voicemail", "content://com.android.voicemail/voicemail", "Calls"),
     ("blocked", "content://com.android.blockednumber/blocked", "Calls"),
+    ("sms_conversations", "content://sms/conversations", "Messages"),
+    ("sec_logs", "content://logs/call_log", "Calls"),
+    ("samsung_logs", "content://com.sec.android.provider.logsprovider/call", "Calls"),
+    ("samsung_context", "content://com.samsung.android.providers.context/log", "Calls"),
     ("vivo_sms", "content://com.vivo.mms/sms", "Messages"),
     ("bbk_sms", "content://com.android.bbksms/sms", "Messages"),
     ("coloros_sms", "content://com.coloros.mms/sms", "Messages"),
@@ -75,6 +79,9 @@ _COMMS_DUMPSYS = (
     ("iccphonebook", "dumpsys iccphonebook", "Contacts"),
     ("iphonesubinfo", "dumpsys iphonesubinfo", "Calls"),
     ("simphonebook", "dumpsys simphonebook", "Contacts"),
+    ("logs", "dumpsys logs", "Calls"),
+    ("incallui", "dumpsys incallui", "Calls"),
+    ("usagestats", "dumpsys usagestats", "User activity log"),
 )
 
 # Telephony / contacts databases — pulled when root or readable on shared storage.
@@ -220,13 +227,16 @@ def discover_sdcard_comm_xml(session: AdbSession,
         listing = session.shell(
             f"find {root} -maxdepth 5 -type f "
             f"\\( -iname 'sms*.xml' -o -iname 'calls*.xml' "
-            f"-o -iname '*smsbackup*.xml' -o -iname '*call-log*.xml' \\) "
+            f"-o -iname '*smsbackup*.xml' -o -iname '*call-log*.xml' "
+            f"-o -iname '*.vcf' \\) "
             f"2>/dev/null | head -{limit * 2}")
         for line in listing.splitlines():
             path = line.strip()
             if not path:
                 continue
             cat = "Calls" if "call" in path.lower() else "Messages"
+            if path.lower().endswith(".vcf"):
+                cat = "Contacts"
             found.append((path, cat))
             if len(found) >= limit:
                 break
@@ -269,6 +279,12 @@ def capture_telephony_identity(session: AdbSession, dest: Path,
         "getprop | grep -iE 'ril\\.|gsm\\.|cdma\\.|sim\\.|imei|msisdn|operator|serialno'",
         "dumpsys isub",
         "dumpsys iphonesubinfo",
+        "cmd phone get-iccid 2>/dev/null",
+        "cmd phone get-imei 2>/dev/null",
+        "cmd phone get-msisdn 2>/dev/null",
+        "service call iphonesubinfo 1",
+        "service call iphonesubinfo 13",
+        "service call iphonesubinfo 15",
     )
     for cmd in commands:
         try:
@@ -409,6 +425,56 @@ def export_contact_lookups(session: AdbSession, dest: Path,
     return result
 
 
+def export_call_lookups(session: AdbSession, dest: Path,
+                        log: Optional[Callable[..., None]] = None
+                        ) -> PullResult:
+    """Dedicated call-log queries with OEM aliases."""
+    from .android_adb import _content_query_paginated
+
+    result = PullResult()
+    out_dir = dest / "calls_export"
+    out_dir.mkdir(parents=True, exist_ok=True)
+    queries = [
+        ("calls", "content://call_log/calls",
+         "_id:number:date:duration:type:name:geocoded_location:numbertype"),
+        ("sec_calls", "content://logs/calls",
+         "_id:number:date:duration:type:name"),
+        ("sec_call", "content://logs/call",
+         "_id:number:date:duration:type:name"),
+        ("samsung_dialer", "content://com.samsung.android.dialer/calls",
+         "_id:number:date:duration:type:name"),
+        ("samsung_logs", "content://com.sec.android.provider.logsprovider/call",
+         "number:date:duration:type:name"),
+        ("voicemail", "content://com.android.voicemail/voicemail",
+         "number:date:duration:source_package"),
+    ]
+    for name, uri, projection in queries:
+        try:
+            text = _content_query_paginated(
+                session, uri, timeout=90, projection=projection)
+        except Exception:
+            text = ""
+        if not text.strip() or "Row:" not in text:
+            try:
+                text = session.shell(
+                    f"content query --uri {uri}", timeout=60) or ""
+            except Exception:
+                continue
+        if not text.strip() or "Row:" not in text:
+            continue
+        if "Permission Denial" in text[:300] or "Error" in text[:80]:
+            continue
+        target = out_dir / f"{name}.txt"
+        target.write_text(text, encoding="utf-8")
+        result.pulled.append(uri)
+        result.bytes_total += target.stat().st_size
+        if log:
+            log("adb.comms", "ok",
+                f"Call export {name}: {text.count('Row:'):,} row(s)",
+                category="Calls")
+    return result
+
+
 def acquire_communications_deep(session: AdbSession, dest: Path,
                                 categories: Optional[List[str]] = None,
                                 log: Optional[Callable[..., None]] = None,
@@ -456,6 +522,8 @@ def acquire_communications_deep(session: AdbSession, dest: Path,
 
     if _wants_contacts(categories):
         _merge_pull(overall, export_contact_lookups(session, dest, log=log))
+    if _wants_calls(categories):
+        _merge_pull(overall, export_call_lookups(session, dest, log=log))
 
     _merge_pull(overall, pull_comm_databases(
         session, dest, categories=comm_cats, log=log))

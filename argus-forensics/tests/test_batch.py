@@ -102,6 +102,16 @@ class TestBatchEngine(unittest.TestCase):
         self.assertFalse(plan.skip_app_discovery)
         self.assertGreaterEqual(plan.file_timeout, 300)
 
+    def test_god_includes_comms_categories(self) -> None:
+        from argus.acquire.engine import apply_god_settings, AcquisitionPlan
+        plan = AcquisitionPlan(
+            operator="Op", exhibit_id="EXH-001",
+            method="comprehensive", god=True,
+            categories=["Files & Media"])
+        apply_god_settings(plan)
+        for name in ("Messages", "Contacts", "Calls", "Chats"):
+            self.assertIn(name, plan.categories)
+
     def test_serial_queue_completes_two_devices(self) -> None:
         plan = BatchAcquisitionPlan(
             operator="Op",

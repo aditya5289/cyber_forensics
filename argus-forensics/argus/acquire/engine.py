@@ -36,7 +36,7 @@ from ..devices.manual import DeviceManual
 from ..parsers.registry import ParseContext, dispatch, load_all
 from ..parsers.timestamps import span_to_range
 from . import android_adb, android_backup, ios_backup
-from .filesystem import ingest_tree
+from .filesystem import IngestResult, ingest_tree
 from .progress import ProgressMeter, human_bytes
 
 ALL_CATEGORIES = [c.value for c in Category]
@@ -175,6 +175,30 @@ def apply_god_settings(plan: AcquisitionPlan) -> None:
     plan.keep_raw = True
     plan.god = True
     plan.turbo = False
+    ensure_comms_categories(plan)
+
+
+def ensure_comms_categories(plan: AcquisitionPlan) -> None:
+    """Always include SMS, calls, contacts and accounts on a full extract."""
+    cats = list(plan.categories or [])
+    for name in ("Messages", "Contacts", "Calls", "Chats", "Accounts"):
+        if name not in cats:
+            cats.append(name)
+    plan.categories = cats
+
+
+def _merge_ingest(into: IngestResult, part: IngestResult) -> IngestResult:
+    into.artifacts.extend(part.artifacts)
+    into.files_seen += part.files_seen
+    into.files_parsed += part.files_parsed
+    into.files_skipped += part.files_skipped
+    into.bytes_seen += part.bytes_seen
+    into.deleted_recovered += part.deleted_recovered
+    into.warnings.extend(part.warnings)
+    into.notes.extend(part.notes)
+    for name, count in part.by_parser.items():
+        into.by_parser[name] = into.by_parser.get(name, 0) + count
+    return into
 
 
 def apply_turbo_settings(plan: AcquisitionPlan) -> None:
@@ -804,6 +828,7 @@ class AcquisitionEngine:
 
         if dev.os_family == "Android":
             if plan.overlay_only:
+                ensure_comms_categories(plan)
                 self._adb_overlay_into(
                     raw_root, report, plan, log,
                     wait=90 if plan.god else 60, required=True)
@@ -857,6 +882,15 @@ class AcquisitionEngine:
                 self._monitor = MtpExtractionMonitor(
                     label, raw_root, log=log, cancel_check=self.cancel_check)
                 self._monitor.start()
+                adb_now = android_adb.live_adb_serial(plan.serial)
+                if adb_now:
+                    try:
+                        android_adb.prepare_handset(
+                            android_adb.AdbSession(adb_now),
+                            log=log, usb_bridge=True)
+                    except Exception as exc:
+                        log("adb.session", "note",
+                            f"USB bridge not set ({type(exc).__name__}: {exc})")
                 mtp_result = mtp.acquire(
                     label, raw_root,
                     progress=lambda msg, **extra: log(
@@ -1209,6 +1243,53 @@ class AcquisitionEngine:
                   f"Logical tree rebuilt: {written} files, {_human(total)}")
 
     # --------------------------------------------------------------- decode
+    def _ingest_comms_first(self, plan: AcquisitionPlan,
+                            container: EvidenceContainer, raw_root: Path,
+                            ctx, skip_sources: Optional[set]) -> IngestResult:
+        """Decode SMS/calls/contacts dumps before the bulk media tree.
+
+        Overlay after MTP writes into ``raw/adb``. Walking photos first delayed
+        those artifacts until ingest finished. Overlay-only skips the MTP
+        photo re-walk entirely.
+        """
+        kw = dict(
+            workers=plan.ingest_workers,
+            progress_every=500 if plan.turbo else 750,
+            batch_size=2000 if plan.turbo else 1000,
+        )
+        skip = set(skip_sources or ())
+        names = ("adb", "comms_logical", "logical", "comms", "dumpsys",
+                 "contacts_export", "calls_export", "live_state")
+        if plan.overlay_only:
+            names = ("adb",)
+        first_dirs = [raw_root / name for name in names
+                      if (raw_root / name).is_dir()]
+        if not first_dirs:
+            return ingest_tree(raw_root, ctx, container,
+                               skip_sources=skip or None, **kw)
+
+        self._log(container, "decode", "start",
+                  "Decoding SMS, calls, contacts and dumpsys first",
+                  phase="decode")
+        combined = IngestResult()
+        for folder in first_dirs:
+            part = ingest_tree(folder, ctx, container,
+                               skip_sources=skip or None, **kw)
+            _merge_ingest(combined, part)
+            skip.update(s["path"] for s in container.db.sources())
+        stats = container.refresh_statistics().get("categories", {})
+        self._log(container, "decode", "ok",
+                  "Communications decoded — "
+                  f"{int(stats.get('Messages', 0)) + int(stats.get('Chats', 0)):,} "
+                  f"message(s), {int(stats.get('Contacts', 0)):,} contact(s), "
+                  f"{int(stats.get('Calls', 0)):,} call(s)")
+        if plan.overlay_only:
+            return combined
+        rest = ingest_tree(raw_root, ctx, container,
+                           skip_sources=skip or None, **kw)
+        _merge_ingest(combined, rest)
+        return combined
+
     def _decode(self, plan: AcquisitionPlan, container: EvidenceContainer,
                 raw_root: Path, report: AcquisitionReport,
                 resumed: bool = False) -> None:
@@ -1247,11 +1328,8 @@ class AcquisitionEngine:
                 self._log(container, "decode", "note",
                           f"Resume — skipping {len(prior):,} source(s) "
                           f"already decoded in this container")
-        result = ingest_tree(raw_root, ctx, container,
-                             workers=plan.ingest_workers,
-                             progress_every=500 if plan.turbo else 750,
-                             batch_size=2000 if plan.turbo else 1000,
-                             skip_sources=skip_sources)
+        result = self._ingest_comms_first(
+            plan, container, raw_root, ctx, skip_sources)
         report.warnings.extend(result.warnings[:200])
         report.notes.extend(result.notes[:200])
         report.files_seen = result.files_seen

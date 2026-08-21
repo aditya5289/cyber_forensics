@@ -95,15 +95,22 @@ SHARED_APP_TREES: List[Tuple[str, str]] = [
     ("/storage/emulated/0/Android/media/com.whatsapp", "Chats"),
     ("/storage/emulated/0/WhatsApp/Databases", "Chats"),
     ("/storage/emulated/0/Telegram", "Chats"),
+    ("/sdcard/Bluetooth", "Files & Media"),
+    ("/sdcard/Recordings/Call", "Calls"),
+    ("/sdcard/Pictures/Screenshots", "Files & Media"),
+    ("/sdcard/DCIM/Screenshots", "Files & Media"),
+    ("/storage/emulated/0/Bluetooth", "Files & Media"),
+    ("/storage/emulated/0/Recordings/Call", "Calls"),
 ]
 
 ROOT_APP_SUBDIRS = ("databases", "files", "shared_prefs", "no_backup")
 
 _CRYPT_FIND = (
-    "find /sdcard /storage/emulated/0 -type f "
+    "find /sdcard /storage/emulated/0 -maxdepth 6 -type f "
     "\\( -name 'msgstore*.db.crypt*' -o -name '*.crypt12' "
     "-o -name '*.crypt14' -o -name '*.crypt15' -o -name 'wa.db' "
-    "-o -name 'msgstore.db' -o -name 'key' \\) 2>/dev/null | head -n 120"
+    "-o -name 'msgstore.db' -o -name 'key' -o -iname '*.vcf' "
+    "-o -iname '*sms*.xml' -o -iname '*calls*.xml' \\) 2>/dev/null | head -n 120"
 )
 
 DB_NAME_HINTS = (

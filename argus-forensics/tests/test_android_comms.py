@@ -56,6 +56,8 @@ class TestAndroidCommsModule(unittest.TestCase):
         self.assertIn("icc_adn", keys)
         self.assertIn("sec_calls", keys)
         self.assertIn("voicemail", keys)
+        self.assertIn("sms_conversations", keys)
+        self.assertIn("samsung_logs", keys)
 
     def test_default_sms_package_parses_role(self) -> None:
         from argus.acquire.android_comms import default_sms_package

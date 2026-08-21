@@ -80,6 +80,11 @@ _SHARED_MEDIA_KEEP = (
     "com.snapchat",
     "com.facebook.orca",
     "/Telegram",
+    ".vcf",
+    "/Bluetooth",
+    "Screenshots",
+    "Recordings/Call",
+    "CallRecord",
 )
 _BROAD_MEDIA_PARENTS = (
     "/sdcard/Android/media", "/sdcard", "/storage/emulated/0",
@@ -178,6 +183,8 @@ PROVIDERS: Dict[str, Tuple[str, str]] = {
     "sms_outbox": ("content://sms/outbox", "Messages"),
     "voicemail": ("content://com.android.voicemail/voicemail", "Calls"),
     "browser": ("content://browser/bookmarks", "Web"),
+    "calendar_attendees": ("content://com.android.calendar/attendees", "Calendar"),
+    "chrome_bookmarks": ("content://com.android.chrome.browser/bookmarks", "Web"),
 }
 
 # Fallback URIs when the primary content provider refuses (common on BBK/Vivo).
@@ -307,6 +314,12 @@ COMM_EXPORT_PATHS: List[Tuple[str, str]] = [
     ("/sdcard/ColorOS/Backup", "Other"),
     ("/storage/emulated/0/HiOS", "Other"),
     ("/storage/emulated/0/PhoneClone", "Other"),
+    ("/sdcard/Bluetooth", "Files & Media"),
+    ("/sdcard/Recordings/Call", "Calls"),
+    ("/sdcard/Pictures/Screenshots", "Files & Media"),
+    ("/sdcard/DCIM/Screenshots", "Files & Media"),
+    ("/storage/emulated/0/Bluetooth", "Files & Media"),
+    ("/storage/emulated/0/Recordings/Call", "Calls"),
 ]
 
 _COMM_CATEGORIES = frozenset({
@@ -431,6 +444,17 @@ CHAT_FS_TARGETS: List[Tuple[str, str]] = [
     ("/sdcard/Android/media/com.whatsapp.w4b", "Chats"),
     ("/sdcard/Android/data/com.whatsapp", "Chats"),
     ("/sdcard/Android/data/com.tencent.mm", "Chats"),
+    ("/sdcard/Bluetooth", "Files & Media"),
+    ("/sdcard/Download", "Messages"),
+    ("/sdcard/Pictures/Screenshots", "Files & Media"),
+    ("/sdcard/DCIM/Screenshots", "Files & Media"),
+    ("/sdcard/Recordings/Call", "Calls"),
+    ("/sdcard/Recordings/Call recordings", "Calls"),
+    ("/sdcard/Sounds/Call", "Calls"),
+    ("/sdcard/Call", "Calls"),
+    ("/sdcard/Notifications", "Messages"),
+    ("/storage/emulated/0/Bluetooth", "Files & Media"),
+    ("/storage/emulated/0/Recordings/Call", "Calls"),
 ]
 
 _MEDIA_CATEGORIES = frozenset({
@@ -763,6 +787,55 @@ class AdbSession:
         return True, "ok"
 
 
+_SHARED_EVIDENCE_FIND = (
+    "find /sdcard /storage/emulated/0 -maxdepth 6 -type f "
+    "\\( -iname '*.vcf' -o -iname '*sms*.xml' -o -iname '*mms*.xml' "
+    "-o -iname '*call*.xml' -o -iname '*smsbackup*' "
+    "-o -iname 'msgstore*.db*' -o -iname '*.crypt12' "
+    "-o -iname '*.crypt14' -o -iname '*.crypt15' -o -iname 'wa.db' "
+    "-o -iname '*contacts*.vcf' \\) 2>/dev/null | head -n 80"
+)
+
+
+def evidence_category(path: str) -> str:
+    """Map a shared-storage path to an ARGUS exhibit category."""
+    lower = (path or "").lower()
+    if lower.endswith(".vcf") or "contact" in lower:
+        return "Contacts"
+    if "crypt" in lower or "msgstore" in lower or "whatsapp" in lower:
+        return "Chats"
+    if "call" in lower or "recording" in lower:
+        return "Calls"
+    return "Messages"
+
+
+def discover_shared_evidence(
+        session: AdbSession,
+        log: Optional[Callable[..., None]] = None,
+        limit: int = 40) -> List[Tuple[str, str]]:
+    """Find vCards, SMS/call XML, and messenger backups on shared storage."""
+    found: List[Tuple[str, str]] = []
+    seen: set[str] = set()
+    try:
+        text = session.shell(_SHARED_EVIDENCE_FIND, timeout=45) or ""
+    except Exception:
+        text = ""
+    if not isinstance(text, str):
+        text = ""
+    for line in text.splitlines():
+        path = line.strip()
+        if not path.startswith("/") or path in seen:
+            continue
+        seen.add(path)
+        found.append((path, evidence_category(path)))
+        if len(found) >= limit:
+            break
+    if found and log:
+        log("adb.filesystem", "note",
+            f"Shared-storage evidence hunt — {len(found)} file(s)")
+    return found
+
+
 def pull_filesystem(session: AdbSession, dest: Path,
                     categories: Optional[List[str]] = None,
                     extra_paths: Optional[List[str]] = None,
@@ -800,6 +873,11 @@ def pull_filesystem(session: AdbSession, dest: Path,
         targets.append((path, cat))
     for p in (extra_paths or []):
         targets.append((p, "Other"))
+
+    try:
+        targets.extend(discover_shared_evidence(session, log=log))
+    except Exception:
+        pass
 
     # Prefer the full shared-storage tree over its named subfolders so a
     # filesystem/turbo run actually captures Internal storage, not just DCIM.
@@ -1050,6 +1128,7 @@ def capture_live_state(session: AdbSession, dest: Path,
             ("accounts.txt", "dumpsys account"),
             ("logcat_events.txt", "logcat -d -b events -t 800"),
             ("logcat_crash.txt", "logcat -d -b crash -t 400"),
+            ("logcat_radio.txt", "logcat -d -b radio -t 400"),
             ("id.txt", "id"),
         ])
     for name, command in commands:
@@ -1122,6 +1201,7 @@ def comprehensive_acquire(session: AdbSession, dest: Path,
 
     overall = PullResult()
     overall.passes = []
+    prepare_handset(session, log=log, usb_bridge=not skip_shared_media)
     if god:
         skip_app_discovery = False
         file_timeout = max(file_timeout, 300)
@@ -1597,6 +1677,8 @@ def _content_query_paginated(sess: AdbSession, uri: str,
         f"content query --uri {uri} --user 0 --projection {projection}",
         f"content query --uri {uri} --projection {projection}",
         f"content query --uri {uri}",
+        f'content query --uri {uri} --user 0 --where "1=1"',
+        f'content query --uri {uri} --where "1=1"',
     ]
     last = ""
     for cmd in variants:
@@ -1638,15 +1720,45 @@ def ensure_device_ready(session: AdbSession,
     return False
 
 
+def prepare_handset(session: AdbSession,
+                    log: Optional[Callable[..., None]] = None,
+                    *, usb_bridge: bool = False) -> Dict[str, str]:
+    """Wake the screen, stay awake, and optionally hold MTP+ADB on one cable.
+
+    ``svc usb setFunctions mtp,adb`` is only issued when *usb_bridge* is set
+    (before an MTP copy). Calling it during an ADB overlay can drop Explorer.
+    """
+    info: Dict[str, str] = {}
+    cmds = [
+        "input keyevent KEYCODE_WAKEUP",
+        "svc power stayon usb",
+        "settings put system screen_off_timeout 1800000",
+        "settings put global stay_on_while_plugged_in 7",
+    ]
+    if usb_bridge:
+        cmds.append("svc usb setFunctions mtp,adb")
+    for cmd in cmds:
+        try:
+            session.shell(cmd, timeout=8)
+        except Exception:
+            continue
+    try:
+        usb = session.shell("getprop sys.usb.config", timeout=5) or ""
+        info["usb_config"] = usb.strip() if isinstance(usb, str) else ""
+    except Exception:
+        info["usb_config"] = ""
+    if log:
+        usb = info.get("usb_config") or "unknown"
+        extra = "; MTP+ADB requested" if usb_bridge else ""
+        log("adb.session", "ok", f"Handset prepared (USB {usb}{extra})")
+    return info
+
+
 def enable_keep_awake(session: AdbSession,
                       log: Optional[Callable[..., None]] = None) -> bool:
     """Prevent screen lock from killing ADB on long Funtouch/MIUI runs."""
     try:
-        session.shell("svc power stayon usb")
-        session.shell("settings put system screen_off_timeout 1800000")
-        if log:
-            log("adb.session", "ok",
-                "Stay-awake enabled — screen will not sleep on USB power")
+        prepare_handset(session, log=log, usb_bridge=False)
         return True
     except AcquisitionError:
         return False
@@ -1761,7 +1873,13 @@ def _restart_adb_server() -> None:
 def wait_for_authorized_adb(log: Optional[Callable[..., None]] = None,
                             *, timeout: int = 180) -> Optional[str]:
     """Wait for an authorized ADB device — prompts examiner to enable debugging."""
-    _restart_adb_server()
+    states = adb_device_states()
+    if states["device"]:
+        return states["device"][0]
+    # Do not kill-server while an unauthorized prompt is showing — that
+    # resets the RSA dialog and can drop an in-progress MTP session.
+    if not states["unauthorized"]:
+        _restart_adb_server()
     deadline = time.time() + timeout
     prompted = False
     vivo_hint = False

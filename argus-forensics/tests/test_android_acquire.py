@@ -131,6 +131,54 @@ class TestAndroidAdbPull(unittest.TestCase):
         "/sdcard/Android/media/com.whatsapp/WhatsApp/Databases", out)
     self.assertIn("/data/system/usagestats", out)
 
+  def test_filter_shared_media_keeps_call_recordings_and_vcard(self) -> None:
+    targets = [
+      ("/sdcard/DCIM", "Files & Media"),
+      ("/sdcard/Bluetooth", "Files & Media"),
+      ("/sdcard/Recordings/Call", "Calls"),
+      ("/sdcard/Download/contacts.vcf", "Contacts"),
+    ]
+    out = [p for p, _ in android_adb.filter_shared_media_targets(
+        targets, skip=True)]
+    self.assertNotIn("/sdcard/DCIM", out)
+    self.assertIn("/sdcard/Bluetooth", out)
+    self.assertIn("/sdcard/Recordings/Call", out)
+    self.assertIn("/sdcard/Download/contacts.vcf", out)
+
+  def test_discover_shared_evidence_categorizes_find_hits(self) -> None:
+    session = mock.Mock()
+    session.shell.return_value = (
+        "/sdcard/Download/contacts.vcf\n"
+        "/sdcard/SMSBackup/sms.xml\n"
+        "/sdcard/WhatsApp/Databases/msgstore.db.crypt15\n"
+        "/sdcard/Recordings/Call/clip.m4a\n"
+    )
+    found = android_adb.discover_shared_evidence(session)
+    by_path = dict(found)
+    self.assertEqual(by_path["/sdcard/Download/contacts.vcf"], "Contacts")
+    self.assertEqual(by_path["/sdcard/SMSBackup/sms.xml"], "Messages")
+    self.assertEqual(
+        by_path["/sdcard/WhatsApp/Databases/msgstore.db.crypt15"], "Chats")
+    self.assertEqual(by_path["/sdcard/Recordings/Call/clip.m4a"], "Calls")
+
+  def test_prepare_handset_requests_mtp_adb_bridge(self) -> None:
+    session = mock.Mock()
+    session.shell.return_value = "mtp,adb"
+    info = android_adb.prepare_handset(session, usb_bridge=True)
+    cmds = [c[0][0] for c in session.shell.call_args_list]
+    self.assertTrue(any("setFunctions mtp,adb" in c for c in cmds))
+    self.assertEqual(info.get("usb_config"), "mtp,adb")
+
+  def test_wait_for_authorized_adb_skips_restart_when_live(self) -> None:
+    with mock.patch("argus.acquire.android_adb.adb_device_states",
+                    return_value={"device": ["SERIAL1"],
+                                  "unauthorized": [],
+                                  "offline": []}):
+      with mock.patch("argus.acquire.android_adb._restart_adb_server") as restart:
+        serial = android_adb.wait_for_authorized_adb(timeout=1)
+    self.assertEqual(serial, "SERIAL1")
+    restart.assert_not_called()
+
   def test_needs_root_skips_sandbox_keeps_usagestats(self) -> None:
     self.assertTrue(android_adb.needs_root(
         "/data/data/com.whatsapp/databases/msgstore.db"))
@@ -282,11 +330,14 @@ class TestEngineAndroidAdbImport(unittest.TestCase):
         pull = android_adb.PullResult(pulled=["/sdcard"], bytes_total=100)
         with mock.patch.object(android_adb, "AdbSession"):
             with mock.patch.object(android_adb, "device_report"):
-                with mock.patch.object(
-                    android_adb, "comprehensive_acquire",
-                    return_value=pull) as comp:
-                    raw = engine._acquire(
-                        plan, container, staging, dev, report, resumed=False)
+                with mock.patch.object(android_adb, "ensure_device_ready",
+                                       return_value=True):
+                    with mock.patch.object(
+                        android_adb, "comprehensive_acquire",
+                        return_value=pull) as comp:
+                        raw = engine._acquire(
+                            plan, container, staging, dev, report,
+                            resumed=False)
         self.assertTrue(raw.exists())
         comp.assert_called_once()
 

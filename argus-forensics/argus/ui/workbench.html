@@ -3400,6 +3400,10 @@ function renderJobResult(j) {
       turbo: false,
       resume: true,
       resume_container: r.container,
+      categories: Array.from(new Set([
+        ...(base.categories || []),
+        "Messages", "Contacts", "Calls", "Chats", "Accounts",
+      ])),
       case_path: S.casePath,
       password: S.casePassword,
       exhibit_id: base.exhibit_id || S.exhibitId || $("#eExhibit")?.value || "",

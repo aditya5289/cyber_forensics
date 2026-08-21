@@ -42,6 +42,7 @@ def _probe_dumpsys(path: Path) -> bool:
               "dumpsys/iphonesubinfo.txt", "dumpsys/simphonebook.txt",
               "dumpsys/iccphonebook.txt", "dumpsys/shortcut.txt",
               "dumpsys/activity_recents.txt",
+              "dumpsys/logs.txt", "dumpsys/incallui.txt",
               "comms/telephony_identity.txt"],
     platform="android",
     priority=85,
@@ -57,12 +58,14 @@ def parse_dumpsys(path: Path, ctx: ParseContext) -> ParseResult:
         return res
 
     name = path.stem.lower()
-    if name in ("call_log", "telephony"):
+    if name in ("call_log", "telephony", "logs", "incallui"):
         _parse_calls(text, path, ctx, res)
         _parse_telecom(text, path, ctx, res)
+        _parse_keyed_calls(text, path, ctx, res)
     elif name in ("telecom", "telecom_dump", "phone"):
         _parse_telecom(text, path, ctx, res)
         _parse_calls(text, path, ctx, res)
+        _parse_keyed_calls(text, path, ctx, res)
     elif name == "contacts":
         _parse_contacts(text, path, ctx, res)
     elif name in ("location", "fused"):
@@ -107,6 +110,63 @@ def _parse_calls(text: str, path: Path, ctx: ParseContext,
         )
         art.add_participant(number, "", role="party")
         res.artifacts.append(art)
+
+
+def _parse_keyed_calls(text: str, path: Path, ctx: ParseContext,
+                       res: ParseResult) -> None:
+    """Samsung/AOSP dumpsys often puts number and date on separate lines."""
+    seen: set = set()
+    current: Dict[str, str] = {}
+
+    def flush() -> None:
+        number = clean_number(current.get("number") or current.get("addr")
+                              or current.get("phone") or "")
+        if not number:
+            return
+        ts = guess(current.get("date") or current.get("time")
+                   or current.get("when"), "date")
+        if ts and not ctx.in_span(ts):
+            return
+        key = (number, ts, current.get("type", ""), current.get("duration", ""))
+        if key in seen:
+            return
+        seen.add(key)
+        duration = current.get("duration") or ""
+        body = f"Call — {number}"
+        if duration:
+            body += f" ({duration}s)"
+        name = (current.get("name") or current.get("cname") or "").strip()
+        art = Artifact(
+            category=Category.CALL, subtype="Call (dumpsys)",
+            timestamp=ts, direction=Direction.UNKNOWN,
+            body=body,
+            app="Android (dumpsys)",
+            source_path=ctx.rel(path),
+            attributes={"duration": duration, "type": current.get("type", "")},
+        )
+        art.add_participant(number, name, role="party")
+        res.artifacts.append(art)
+
+    for line in text.splitlines():
+        stripped = line.strip()
+        if not stripped:
+            if current:
+                flush()
+                current = {}
+            continue
+        match = re.match(
+            r"(number|addr|phone|date|time|when|duration|type|name|cname)"
+            r"\s*[=:]\s*(.+)$",
+            stripped, re.IGNORECASE)
+        if not match:
+            continue
+        key = match.group(1).lower()
+        if key == "number" and current.get("number"):
+            flush()
+            current = {}
+        current[key] = match.group(2).strip().strip(",")
+    if current:
+        flush()
 
 
 def _parse_contacts(text: str, path: Path, ctx: ParseContext,
@@ -324,26 +384,55 @@ def _parse_notifications(text: str, path: Path, ctx: ParseContext,
 def _parse_sms_dump(text: str, path: Path, ctx: ParseContext,
                     res: ParseResult) -> None:
     seen: set = set()
-    for match in re.finditer(
-            r"(?:address|addr|from|originatingAddress)=([+\d][\d\- ]{5,}\d)"
-            r".{0,240}?(?:body|text|msg)=(.+?)(?:,\s*\w+=|$)",
-            text, re.IGNORECASE | re.DOTALL):
-        number = clean_number(match.group(1))
-        body = re.sub(r"\s+", " ", match.group(2)).strip()[:2000]
+
+    def add(number: str, body: str, ts: Optional[int] = None) -> None:
+        number = clean_number(number)
+        body = re.sub(r"\s+", " ", body or "").strip()[:2000]
         if not number or not body:
-            continue
-        key = (number, body[:80])
+            return
+        if ts and not ctx.in_span(ts):
+            return
+        key = (number, body[:80], ts)
         if key in seen:
-            continue
+            return
         seen.add(key)
         art = Artifact(
             category=Category.MESSAGE, subtype="SMS (dumpsys)",
-            direction=Direction.UNKNOWN, body=body,
+            timestamp=ts, direction=Direction.UNKNOWN, body=body,
             app="Android SMS (dumpsys)",
             source_path=ctx.rel(path),
         )
         art.add_participant(number, "", role="party")
         res.artifacts.append(art)
+
+    for match in re.finditer(
+            r"(?:address|addr|from|originatingAddress)=([+\d][\d\- ]{5,}\d)"
+            r".{0,400}?(?:body|text|msg|messageBody)=(.+?)(?:,\s*\w+=|$)",
+            text, re.IGNORECASE | re.DOTALL):
+        add(match.group(1), match.group(2))
+    current: Dict[str, str] = {}
+    for line in text.splitlines():
+        stripped = line.strip()
+        if not stripped:
+            if current:
+                add(current.get("address") or current.get("originatingaddress")
+                    or "", current.get("body") or current.get("messagebody")
+                    or current.get("text") or "",
+                    guess(current.get("date"), "date"))
+                current = {}
+            continue
+        match = re.match(
+            r"(address|addr|originatingAddress|body|text|msg|messageBody|date)"
+            r"\s*[=:]\s*(.+)$",
+            stripped, re.IGNORECASE)
+        if not match:
+            continue
+        current[match.group(1).lower()] = match.group(2).strip().strip(",")
+    if current:
+        add(current.get("address") or current.get("originatingaddress") or "",
+            current.get("body") or current.get("messagebody")
+            or current.get("text") or "",
+            guess(current.get("date"), "date"))
 
 
 def _parse_subscription(text: str, path: Path, ctx: ParseContext,
