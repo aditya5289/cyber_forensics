@@ -29,6 +29,19 @@ class TestAcquisitionSummary(unittest.TestCase):
             self.assertEqual(summary["adb"]["pulled"], 5)
             self.assertEqual(len(summary["comms_providers"]), 2)
 
+    def test_yield_json_fills_comms_rows(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            dest = root / "adb" / "comms"
+            dest.mkdir(parents=True)
+            (dest / "yield.json").write_text(json.dumps({
+                "row_total": 17,
+                "providers_with_rows": ["icc_adn", "samsung_sms"],
+            }), encoding="utf-8")
+            summary = build_acquisition_summary(root, method="mtp")
+            self.assertEqual(summary["comms_row_total"], 17)
+            self.assertIn("icc_adn", summary["comms_providers_with_rows"])
+
     def test_physical_manifest_and_caveats(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
             root = Path(tmp)

@@ -40,7 +40,8 @@ def _probe_dumpsys(path: Path) -> bool:
               "dumpsys/fused.txt", "dumpsys/notification.txt",
               "dumpsys/isub.txt", "dumpsys/sms.txt", "dumpsys/mms.txt",
               "dumpsys/iphonesubinfo.txt", "dumpsys/simphonebook.txt",
-              "dumpsys/iccphonebook.txt",
+              "dumpsys/iccphonebook.txt", "dumpsys/shortcut.txt",
+              "dumpsys/activity_recents.txt",
               "comms/telephony_identity.txt"],
     platform="android",
     priority=85,
@@ -73,6 +74,9 @@ def parse_dumpsys(path: Path, ctx: ParseContext) -> ParseResult:
         _parse_notifications(text, path, ctx, res)
     elif name in ("isub", "iphonesubinfo", "telephony_identity"):
         _parse_subscription(text, path, ctx, res)
+    elif name in ("shortcut", "activity_recents"):
+        _parse_notifications(text, path, ctx, res)
+        _parse_contacts(text, path, ctx, res)
     elif name in ("simphonebook", "iccphonebook"):
         _parse_contacts(text, path, ctx, res)
     else:

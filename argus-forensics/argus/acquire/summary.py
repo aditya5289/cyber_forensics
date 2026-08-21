@@ -146,6 +146,16 @@ def build_acquisition_summary(raw_root: Path,
         summary["data_types"]["dumpsys_files"] = sum(
             1 for p in dumpsys_dir.glob("*.txt") if p.stat().st_size > 40)
 
+    yield_file = raw_root / "comms" / "yield.json"
+    if not yield_file.is_file():
+        yield_file = raw_root / "adb" / "comms" / "yield.json"
+    ydata = _read_json(yield_file) if yield_file.is_file() else None
+    if ydata:
+        summary["comms_row_total"] = max(
+            int(summary.get("comms_row_total") or 0),
+            int(ydata.get("row_total") or 0))
+        summary["comms_providers_with_rows"] = ydata.get("providers_with_rows") or []
+
     return summary
 
 

@@ -79,6 +79,7 @@ class AcquisitionPlan:
     physical_full: bool = False
     file_timeout: int = 180  # per-file ADB/MTP timeout seconds — enhanced acquisition
     god: bool = False        # god-level: maximum thoroughness + parallelism
+    overlay_only: bool = False  # ADB overlay into an existing MTP container
 
     def validate(self) -> None:
         if not self.operator:
@@ -172,6 +173,8 @@ def apply_god_settings(plan: AcquisitionPlan) -> None:
     plan.skip_content_sniff = False
     plan.fast_seal = False
     plan.keep_raw = True
+    plan.god = True
+    plan.turbo = False
 
 
 def apply_turbo_settings(plan: AcquisitionPlan) -> None:
@@ -399,11 +402,14 @@ class AcquisitionEngine:
     def run(self, plan: AcquisitionPlan,
             device: Optional[DetectedDevice] = None) -> AcquisitionReport:
         plan.validate()
-        # god takes precedence over turbo — both apply performance baseline first
+        # God-level must not be undone by turbo. Turbo after god used to disable
+        # carving, hash verify, and app discovery — the opposite of a full extract.
         if getattr(plan, "god", False) or plan.method in ("comprehensive", "god"):
             apply_god_settings(plan)
-        apply_performance_settings(plan)
-        apply_turbo_settings(plan)
+            apply_performance_settings(plan)
+        else:
+            apply_performance_settings(plan)
+            apply_turbo_settings(plan)
 
         if (plan.method == "import" and plan.source_path
                 and self._is_argus_container_import(plan.source_path)):
@@ -797,6 +803,11 @@ class AcquisitionEngine:
                 level="warning")
 
         if dev.os_family == "Android":
+            if plan.overlay_only:
+                self._adb_overlay_into(
+                    raw_root, report, plan, log,
+                    wait=90 if plan.god else 60, required=True)
+                return raw_root
             adb_wanted = plan.method in (
                 "logical", "filesystem", "turbo", "comprehensive",
                 "backup", "physical")
@@ -885,37 +896,9 @@ class AcquisitionEngine:
                         "(enable Developer options → USB debugging, then re-run "
                         "with ADB) or an on-device backup app export.",
                         level="warning")
-                serial = android_adb.wait_for_authorized_adb(log, timeout=40)
-                if serial:
-                    log("adb", "ok",
-                        "USB debugging authorised during MTP — running "
-                        "comprehensive overlay (logical, apps, filesystem, APKs)")
-                    overlay_session = android_adb.AdbSession(serial)
-                    android_adb.enable_keep_awake(overlay_session, log=log)
-                    try:
-                        overlay = android_adb.comprehensive_acquire(
-                            overlay_session, raw_root / "adb", plan.categories, log,
-                            skip_existing=True,
-                            verify=plan.verify_pulls,
-                            parallel=min(4, max(1, plan.parallel_pulls)),
-                            skip_app_discovery=plan.skip_app_discovery,
-                            file_timeout=plan.file_timeout,
-                            skip_shared_media=True, god=plan.god)
-                    except Exception as exc:
-                        log("adb.comprehensive", "warning",
-                            "ADB overlay hit a host/device error and continued "
-                            f"with what had already landed: {type(exc).__name__}: "
-                            f"{exc}",
-                            level="warning")
-                        overlay = android_adb.PullResult()
-                    report.files_acquired += len(overlay.pulled)
-                    report.bytes_acquired += overlay.bytes_total
-                    try:
-                        android_adb.write_adb_manifest(
-                            raw_root / "adb", overlay, method="comprehensive",
-                            serial=serial)
-                    except OSError:
-                        pass
+                self._adb_overlay_into(
+                    raw_root, report, plan, log,
+                    wait=90 if plan.god else 40, required=False)
                 log("mtp", "ok",
                     f"Copied {mtp_result.files_copied} of "
                     f"{mtp_result.files_listed} listed file(s), "
@@ -1080,6 +1063,67 @@ class AcquisitionEngine:
             return raw_root
 
         raise AcquisitionError(f"unsupported platform: {dev.os_family}")
+
+    def _adb_overlay_into(self, raw_root: Path, report: AcquisitionReport,
+                          plan: AcquisitionPlan, log: Callable[..., None],
+                          *, serial: Optional[str] = None,
+                          wait: int = 40, required: bool = False) -> None:
+        """Run comprehensive ADB into ``raw/adb`` without recopying MTP media."""
+        pending = raw_root / "argus-overlay-pending.json"
+        if not serial:
+            serial = android_adb.wait_for_authorized_adb(log, timeout=wait)
+        if not serial:
+            payload = {
+                "format": "argus-overlay-pending/1",
+                "reason": "usb_debugging_not_authorised",
+                "waited_seconds": wait,
+            }
+            try:
+                pending.write_text(json.dumps(payload, indent=2), encoding="utf-8")
+            except OSError:
+                pass
+            msg = (
+                "USB debugging was not authorised — shared storage is saved. "
+                "Unlock the phone, tap Allow, then use Run ADB overlay "
+                "(does not recopy photos and videos).")
+            log("adb", "warning", msg, level="warning")
+            report.notes.append("ADB overlay pending — authorise USB debugging.")
+            report.warnings.append(msg)
+            if required:
+                raise AcquisitionError(msg)
+            return
+        try:
+            pending.unlink()
+        except OSError:
+            pass
+        log("adb", "ok",
+            "USB debugging authorised — comprehensive overlay "
+            "(SMS, calls, contacts, dumpsys, live state)")
+        overlay_session = android_adb.AdbSession(serial)
+        android_adb.enable_keep_awake(overlay_session, log=log)
+        try:
+            overlay = android_adb.comprehensive_acquire(
+                overlay_session, raw_root / "adb", plan.categories, log,
+                skip_existing=True,
+                verify=plan.verify_pulls,
+                parallel=min(4, max(1, plan.parallel_pulls)),
+                skip_app_discovery=plan.skip_app_discovery,
+                file_timeout=plan.file_timeout,
+                skip_shared_media=True, god=True)
+        except Exception as exc:
+            log("adb.comprehensive", "warning",
+                "ADB overlay hit a host/device error and continued "
+                f"with what had already landed: {type(exc).__name__}: {exc}",
+                level="warning")
+            overlay = android_adb.PullResult()
+        report.files_acquired += len(overlay.pulled)
+        report.bytes_acquired += overlay.bytes_total
+        try:
+            android_adb.write_adb_manifest(
+                raw_root / "adb", overlay, method="comprehensive",
+                serial=serial)
+        except OSError:
+            pass
 
     def _mtp_shared_overlay(self, raw_root: Path, report: AcquisitionReport,
                             plan: AcquisitionPlan, resumed: bool,
@@ -1340,7 +1384,8 @@ class AcquisitionEngine:
         stats = getattr(pull, "provider_stats", None) or []
         comm_keys = {"sms", "sms_inbox", "sms_sent", "mms", "threads",
                      "contacts", "contacts_all", "calls", "mms_part",
-                     "vivo_sms", "bbk_sms", "sec_calls"}
+                     "vivo_sms", "bbk_sms", "sec_calls", "samsung_sms",
+                     "samsung_msg", "google_sms", "icc_adn", "icc_sms"}
         comm_providers = [s for s in stats if s.get("key") in comm_keys]
         if comm_providers:
             empty = [s["key"] for s in comm_providers

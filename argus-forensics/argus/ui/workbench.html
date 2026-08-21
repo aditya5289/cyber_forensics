@@ -549,7 +549,7 @@ const PALETTE_ITEMS = [
   ["overview", "Case overview", "2"],
   ["exhibit", "Register exhibit", "3"],
   ["device", "Scan & device support", "4"],
-  ["extract", "Extract (god-speed)", "5"],
+  ["extract", "Extract (god-level)", "5"],
   ["analyse", "Analyse", "6"],
   ["findings", "Findings / lead sheet", "7"],
   ["report", "Report & certificate", "8"],
@@ -1598,7 +1598,8 @@ async function viewDevice(m) {
       const batchBody = {
         case_path: S.casePath, password: S.casePassword,
         operator: op, method: hasMtp ? "mtp" : "comprehensive",
-        turbo: true,
+        turbo: false,
+        god: true,
         all_connected: allConnected, devices: devices.map(d => ({
           ...d, resume: hasIncomplete,
         })),
@@ -2293,6 +2294,7 @@ async function viewExtract(m) {
       recover_deleted: $("#eCarve").checked,
       carve_confidence: parseFloat($("#eConf").value) || 0.45,
       turbo: liveMethod === "turbo",
+      god: liveMethod !== "turbo",
       physical_full: !!$("#ePhysFull")?.checked,
       resume: !!S.resumeContainer,
       resume_container: S.resumeContainer || "",
@@ -2616,15 +2618,24 @@ async function viewExtract(m) {
   $("#eGod").onclick = () => {
     m.querySelectorAll(".cat").forEach(c => { c.checked = true; });
     const carve = $("#eCarve");
-    if (carve) { carve.checked = false; carve.disabled = true; }
-    method = (dev?.transport === "mtp" && !(S.devices || []).some(d => d.transport === "adb"))
-      ? "mtp" : "comprehensive";
+    if (carve) { carve.checked = true; carve.disabled = false; }
+    const hasAdb = (S.devices || []).some(d => d.transport === "adb")
+      || S.device?.transport === "adb";
+    const hasMtp = (S.devices || []).some(d => d.transport === "mtp")
+      || S.device?.transport === "mtp";
+    if (S.device?.transport === "usbmux" || /ios/i.test(S.device?.os_family || "")) {
+      method = "backup";
+    } else if (hasMtp) {
+      method = "mtp";
+    } else {
+      method = hasAdb ? "comprehensive" : method;
+    }
     paintMethodCards();
     paintMethods();
     syncTurboRecovery();
     const pipe = $("#eAutoPipe");
     if (pipe) pipe.checked = true;
-    toast("God-level extract — comprehensive, all categories, auto-analyse", { type: "ok" });
+    toast("God-level extract — all categories, deleted carving, full ADB overlay", { type: "ok" });
     $("#eRun").click();
   };
   const paintResume = async () => {
@@ -3166,8 +3177,8 @@ function composeExtractFolio(r) {
     verdict = "The container is present, but decode has not produced artifacts yet.";
   }
   const next = mtpGap
-    ? { label: "Run Comprehensive with USB debugging",
-        reason: "Logical providers and app databases require an authorised ADB session." }
+    ? { label: "Run ADB overlay (no MTP recopy)",
+        reason: "Authorise USB debugging, then overlay SMS/calls/contacts into this container." }
     : crypt
       ? { label: "Supply the WhatsApp key or crypt15 passphrase",
           reason: "Encrypted stores are named, not opened." }
@@ -3179,7 +3190,11 @@ function composeExtractFolio(r) {
   if (cats.Calls) held.push(`${num(cats.Calls)} call(s).`);
   if (deleted) held.push(`${num(deleted)} recovered deleted record(s).`);
   const gaps = [];
-  if (mtpGap) gaps.push("MTP cannot reach /data/data.");
+  if (mtpGap) gaps.push("MTP cannot reach /data/data. Use Run ADB overlay after USB debugging.");
+  const mtpPct = r.acquisition_summary?.mtp?.completeness_pct;
+  if (mtpPct != null && mtpPct < 100) {
+    held.push(`MTP copy ${mtpPct}% complete.`);
+  }
   (r.acquisition_summary?.caveats || []).slice(0, 3).forEach(c => gaps.push(c));
   return `<div class="folio">
     <div class="mark">Examiner’s folio</div>
@@ -3258,7 +3273,7 @@ function renderJobResult(j) {
               serial: x.serial,
               exhibit_id: x.exhibit_id || base.exhibit_id || "",
               device_name: x.device_name || base.device_name || "",
-              method: base.method || S.lastBatchPayload.method || "turbo",
+              method: base.method === "turbo" ? "comprehensive" : (base.method || S.lastBatchPayload.method || "comprehensive"),
               transport: base.transport || "",
               mtp_name: base.mtp_name || "",
               make: base.make || "",
@@ -3366,6 +3381,7 @@ function renderJobResult(j) {
     <div class="actions">
       ${r.export_zip ? `<button class="btn primary" id="openZip">Open ZIP file</button>` : ""}
       <button class="btn ${r.export_zip ? "" : "primary"}" id="openContainer">Open extraction folder</button>
+      ${r.method === "mtp" ? `<button class="btn primary" id="runOverlay">Run ADB overlay (no MTP recopy)</button>` : ""}
       ${r.export_zip ? "" : `<button class="btn" id="saveContainerZip">Save as ZIP</button>`}
       <button class="btn sm" id="copyContainerPath">Copy path</button>
       <button class="btn" id="goAnalyse">Analyse this extraction →</button>
@@ -3374,6 +3390,37 @@ function renderJobResult(j) {
       <button class="btn" id="goAgain">Run another extraction</button></div>`;
   $("#openZip")?.addEventListener("click", () => openContainerFolder(r.export_zip));
   $("#openContainer")?.addEventListener("click", () => openContainerFolder(r.container));
+  $("#runOverlay")?.addEventListener("click", async () => {
+    const base = S.lastAcquirePayload || {};
+    const payload = {
+      ...base,
+      method: "comprehensive",
+      overlay_only: true,
+      god: true,
+      turbo: false,
+      resume: true,
+      resume_container: r.container,
+      case_path: S.casePath,
+      password: S.casePassword,
+      exhibit_id: base.exhibit_id || S.exhibitId || $("#eExhibit")?.value || "",
+      operator: base.operator || $("#eOp")?.value?.trim() || "",
+    };
+    if (!payload.operator || !payload.exhibit_id) {
+      toast("Operator and exhibit are required to run the overlay.", { type: "bad" });
+      return;
+    }
+    try {
+      S.lastAcquirePayload = payload;
+      const resp = await post("acquire", payload);
+      toast("ADB overlay — SMS, calls and contacts into this container", { type: "ok" });
+      watchJob(resp.job_id, "runBlock", async () => {
+        await refreshCase();
+        S.containers = (S.caseOverview.extractions || []).map(x => x.path);
+      });
+    } catch (e) {
+      toast(e.message || String(e), { type: "bad" });
+    }
+  });
   if (!r.export_zip) $("#saveContainerZip")?.addEventListener("click", () => saveContainerZip(r.container));
   $("#copyContainerPath")?.addEventListener("click", () => {
     const text = r.export_zip || r.container || "";

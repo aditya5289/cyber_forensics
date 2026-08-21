@@ -382,6 +382,7 @@ def cmd_acquire_batch(args, out: Out) -> int:
                            if s.strip()],
         owner_name=args.owner_name,
         turbo=bool(args.turbo),
+        god=bool(getattr(args, "god", False)) or not bool(args.turbo),
     )
     plan.validate()
 

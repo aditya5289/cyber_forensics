@@ -68,6 +68,7 @@ class BatchAcquisitionPlan:
     owner_identifiers: List[str] = field(default_factory=list)
     owner_name: str = "Device owner"
     turbo: bool = False
+    god: bool = True
 
     def validate(self) -> None:
         if not self.operator:
@@ -260,7 +261,9 @@ class BatchAcquisitionEngine:
                     spec.exhibit_id = eid
                     result.exhibit_id = eid
 
-                method = "turbo" if plan.turbo else spec.method
+                method = spec.method
+                if plan.turbo and not plan.god:
+                    method = "turbo"
                 acq = AcquisitionPlan(
                     method=method,
                     time_span=plan.time_span,
@@ -276,7 +279,8 @@ class BatchAcquisitionEngine:
                     owner_name=plan.owner_name,
                     notes=spec.notes,
                     resume=spec.resume,
-                    turbo=plan.turbo,
+                    turbo=plan.turbo and not plan.god,
+                    god=plan.god or method == "comprehensive",
                 )
 
                 def device_progress(entry: Dict[str, Any]) -> None:

@@ -89,6 +89,19 @@ class TestBatchEngine(unittest.TestCase):
         self.assertGreaterEqual(plan.file_timeout, 180)
         self.assertGreaterEqual(plan.parallel_pulls, 1)
 
+    def test_god_beats_turbo(self) -> None:
+        from argus.acquire.engine import apply_god_settings, AcquisitionPlan
+        plan = AcquisitionPlan(
+            operator="Op", exhibit_id="EXH-001",
+            method="comprehensive", god=True, turbo=True)
+        apply_god_settings(plan)
+        self.assertTrue(plan.god)
+        self.assertFalse(plan.turbo)
+        self.assertTrue(plan.recover_deleted)
+        self.assertTrue(plan.verify_pulls)
+        self.assertFalse(plan.skip_app_discovery)
+        self.assertGreaterEqual(plan.file_timeout, 300)
+
     def test_serial_queue_completes_two_devices(self) -> None:
         plan = BatchAcquisitionPlan(
             operator="Op",

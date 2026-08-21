@@ -76,6 +76,10 @@ _SHARED_MEDIA_KEEP = (
     "com.google.android.apps.messaging",
     "SMSBackup",
     "/Samsung/Messages",
+    "com.instagram",
+    "com.snapchat",
+    "com.facebook.orca",
+    "/Telegram",
 )
 _BROAD_MEDIA_PARENTS = (
     "/sdcard/Android/media", "/sdcard", "/storage/emulated/0",
@@ -339,6 +343,20 @@ _DUMPSYS_EXTRA = (
     ("iphonesubinfo", "dumpsys iphonesubinfo", "Calls"),
     ("notification", "dumpsys notification --noredact", "Messages"),
     ("media_session", "dumpsys media_session", "Files & Media"),
+)
+
+# God-level extra dumpsys — recents, accounts, radio, Bluetooth, shortcuts.
+_DUMPSYS_GOD = (
+    ("battery", "dumpsys battery", "Applications"),
+    ("bluetooth", "dumpsys bluetooth_manager", "Networks"),
+    ("activity_recents", "dumpsys activity recents", "User activity log"),
+    ("activity_activities", "dumpsys activity activities", "User activity log"),
+    ("shortcut", "dumpsys shortcut", "Messages"),
+    ("user", "dumpsys user", "Applications"),
+    ("diskstats", "dumpsys diskstats", "Applications"),
+    ("dropbox", "dumpsys dropbox", "User activity log"),
+    ("search", "dumpsys search", "Web"),
+    ("autofill", "dumpsys autofill", "Accounts"),
 )
 
 # Paths pulled by the file-system action, in priority order
@@ -1008,12 +1026,13 @@ def probe_capabilities(session: AdbSession) -> Dict[str, Any]:
 
 
 def capture_live_state(session: AdbSession, dest: Path,
-                       log: Optional[Callable[..., None]] = None) -> PullResult:
+                       log: Optional[Callable[..., None]] = None,
+                       *, god: bool = False) -> PullResult:
     """Settings, identity dumps, and a bounded logcat snapshot."""
     result = PullResult()
     out_dir = dest / "live_state"
     out_dir.mkdir(parents=True, exist_ok=True)
-    commands = (
+    commands = [
         ("settings_secure.txt", "settings list secure"),
         ("settings_system.txt", "settings list system"),
         ("settings_global.txt", "settings list global"),
@@ -1021,13 +1040,24 @@ def capture_live_state(session: AdbSession, dest: Path,
         ("logcat_tail.txt", "logcat -d -t 2000"),
         ("ip_addr.txt", "ip addr"),
         ("df.txt", "df -h"),
-    )
+    ]
+    if god:
+        commands.extend([
+            ("packages.txt", "pm list packages -U -f -u"),
+            ("features.txt", "pm list features"),
+            ("props.txt", "getprop"),
+            ("uptime.txt", "uptime"),
+            ("accounts.txt", "dumpsys account"),
+            ("logcat_events.txt", "logcat -d -b events -t 800"),
+            ("logcat_crash.txt", "logcat -d -b crash -t 400"),
+            ("id.txt", "id"),
+        ])
     for name, command in commands:
         try:
             text = session.shell(command, timeout=45)
         except AcquisitionError:
             continue
-        if not isinstance(text, str) or len(text.strip()) < 20:
+        if not isinstance(text, str) or len(text.strip()) < 8:
             continue
         target = out_dir / name
         target.write_text(text, encoding="utf-8", errors="replace")
@@ -1036,6 +1066,35 @@ def capture_live_state(session: AdbSession, dest: Path,
     if log and result.pulled:
         log("adb.live", "ok",
             f"Live state — {len(result.pulled)} dump(s)")
+    return result
+
+
+def capture_screenshot(session: AdbSession, dest: Path,
+                       log: Optional[Callable[..., None]] = None) -> PullResult:
+    """Unlocked-device screenshot via screencap (authorized ADB, not an exploit)."""
+    result = PullResult()
+    remote = "/sdcard/argus-screencap.png"
+    local = dest / "live_state" / "screencap.png"
+    local.parent.mkdir(parents=True, exist_ok=True)
+    try:
+        session.shell(f"screencap -p {remote}", timeout=20)
+        ok, msg = session.pull(remote, local, verify=False, log=log)
+        try:
+            session.shell(f"rm -f {remote}", timeout=8)
+        except AcquisitionError:
+            pass
+        if ok and local.exists():
+            result.pulled.append(remote)
+            result.bytes_total += local.stat().st_size
+            if log:
+                log("adb.live", "ok",
+                    f"Screenshot captured ({result.bytes_total:,} bytes)")
+        elif log:
+            log("adb.live", "skipped", f"Screenshot: {msg[:80]}")
+    except Exception as exc:
+        if log:
+            log("adb.live", "skipped",
+                f"Screenshot skipped: {type(exc).__name__}: {exc}")
     return result
 
 
@@ -1063,9 +1122,11 @@ def comprehensive_acquire(session: AdbSession, dest: Path,
 
     overall = PullResult()
     overall.passes = []
-    # god forces 9 passes even if skip_app_discovery would trim to 5
     if god:
-        total_passes = 9
+        skip_app_discovery = False
+        file_timeout = max(file_timeout, 300)
+        enable_keep_awake(session, log=log)
+        total_passes = 10
     else:
         total_passes = 7 if not skip_app_discovery else 5
     pass_no = 1
@@ -1094,7 +1155,8 @@ def comprehensive_acquire(session: AdbSession, dest: Path,
                 f"Pass {pass_no}/{total_passes} — discovering application databases",
                 phase="transfer", progress_current=pass_no - 1,
                 progress_total=total_passes)
-        discovered = discover_app_databases(session, log=log, limit=180)
+        discovered = discover_app_databases(
+            session, log=log, limit=400 if god else 180)
         extra = [d.remote_path for d in discovered]
         overall.passes.append("discover")
         if log and extra:
@@ -1154,6 +1216,12 @@ def comprehensive_acquire(session: AdbSession, dest: Path,
     if extra_dump.pulled:
         overall.passes.append("dumpsys_extra")
         _merge_pull(overall, extra_dump)
+    if god:
+        god_dump = export_dumpsys(
+            session, dest, _DUMPSYS_GOD, categories=categories, log=log)
+        if god_dump.pulled:
+            overall.passes.append("dumpsys_god")
+            _merge_pull(overall, god_dump)
 
     from .android_apps import (
         discover_shared_crypt, pull_root_app_trees, pull_shared_app_trees,
@@ -1189,10 +1257,15 @@ def comprehensive_acquire(session: AdbSession, dest: Path,
             overall.passes.append("root_apps")
             _merge_pull(overall, rooted)
 
-    live = capture_live_state(session, dest, log=log)
+    live = capture_live_state(session, dest, log=log, god=god)
     if live.pulled:
         overall.passes.append("live_state")
         _merge_pull(overall, live)
+    if god:
+        shot = capture_screenshot(session, dest, log=log)
+        if shot.pulled:
+            overall.passes.append("screencap")
+            _merge_pull(overall, shot)
 
     pass_no += 1
     if log:

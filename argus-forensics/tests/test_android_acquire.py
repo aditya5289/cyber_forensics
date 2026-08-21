@@ -219,6 +219,37 @@ class TestComprehensiveAcquire(unittest.TestCase):
     fs.assert_called_once()
     comms.assert_called_once()
 
+  def test_god_forces_app_discovery(self) -> None:
+    session = mock.Mock()
+    session.has_root = False
+    empty = android_adb.PullResult()
+    with mock.patch("argus.acquire.android_adb.logical_query", return_value=empty), \
+         mock.patch("argus.acquire.android_apps.discover_app_databases",
+                    return_value=[]) as disc, \
+         mock.patch("argus.acquire.android_adb.pull_filesystem", return_value=empty), \
+         mock.patch("argus.acquire.android_adb.acquire_comms_supplement",
+                    return_value=empty), \
+         mock.patch("argus.acquire.android_apps.pull_user_apks", return_value=empty), \
+         mock.patch("argus.acquire.android_apps.discover_shared_crypt",
+                    return_value=[]), \
+         mock.patch("argus.acquire.android_apps.pull_shared_app_trees",
+                    return_value=empty), \
+         mock.patch("argus.acquire.android_apps.pull_root_app_trees",
+                    return_value=empty), \
+         mock.patch("argus.acquire.android_adb.capture_live_state",
+                    return_value=empty), \
+         mock.patch("argus.acquire.android_adb.capture_screenshot",
+                    return_value=empty), \
+         mock.patch("argus.acquire.android_adb.enable_keep_awake",
+                    return_value=True), \
+         mock.patch("argus.acquire.android_adb.export_dumpsys",
+                    return_value=empty):
+      with tempfile.TemporaryDirectory() as tmp:
+        android_adb.comprehensive_acquire(
+            session, Path(tmp), skip_app_discovery=True, god=True)
+    disc.assert_called()
+    self.assertGreaterEqual(disc.call_args.kwargs.get("limit", 0), 400)
+
 
 class TestEngineAndroidAdbImport(unittest.TestCase):
     def test_comprehensive_path_uses_module_level_android_adb(self) -> None:
@@ -282,6 +313,54 @@ class TestSharedHarvest(unittest.TestCase):
       result = android_adb.capture_live_state(session, dest)
       self.assertGreater(len(result.pulled), 0)
       self.assertTrue((dest / "live_state" / "settings_secure.txt").is_file())
+
+  def test_live_state_god_adds_package_dump(self) -> None:
+    session = mock.Mock()
+    session.shell.return_value = "package:com.whatsapp uid:10123\n" * 4
+    with tempfile.TemporaryDirectory() as tmp:
+      dest = Path(tmp)
+      result = android_adb.capture_live_state(session, dest, god=True)
+      names = {p.name for p in (dest / "live_state").iterdir()}
+    self.assertIn("packages.txt", names)
+    self.assertIn("props.txt", names)
+    self.assertGreater(len(result.pulled), 7)
+
+
+class TestAdbOverlayInto(unittest.TestCase):
+  def test_writes_pending_when_adb_missing(self) -> None:
+    from argus.acquire.engine import (AcquisitionEngine, AcquisitionPlan,
+                                      AcquisitionReport)
+    from argus.core.case import Case
+
+    case = Case.create(Path(tempfile.mkdtemp()), case_id="OV", investigator="t")
+    engine = AcquisitionEngine(case)
+    plan = AcquisitionPlan(operator="t", exhibit_id="EXH-001", method="mtp")
+    report = AcquisitionReport()
+    with tempfile.TemporaryDirectory() as tmp:
+      root = Path(tmp)
+      with mock.patch("argus.acquire.android_adb.wait_for_authorized_adb",
+                      return_value=None):
+        engine._adb_overlay_into(root, report, plan, log=lambda *a, **k: None)
+      self.assertTrue((root / "argus-overlay-pending.json").is_file())
+    self.assertTrue(any("overlay pending" in n.lower() for n in report.notes))
+
+  def test_overlay_required_raises_without_adb(self) -> None:
+    from argus.acquire.engine import (AcquisitionEngine, AcquisitionPlan,
+                                      AcquisitionReport)
+    from argus.core.case import Case
+    from argus.core.errors import AcquisitionError
+
+    case = Case.create(Path(tempfile.mkdtemp()), case_id="OV2", investigator="t")
+    engine = AcquisitionEngine(case)
+    plan = AcquisitionPlan(operator="t", exhibit_id="EXH-001",
+                           method="comprehensive", overlay_only=True)
+    report = AcquisitionReport()
+    with tempfile.TemporaryDirectory() as tmp:
+      with mock.patch("argus.acquire.android_adb.wait_for_authorized_adb",
+                      return_value=None):
+        with self.assertRaises(AcquisitionError):
+          engine._adb_overlay_into(Path(tmp), report, plan,
+                                   log=lambda *a, **k: None, required=True)
 
 
 if __name__ == "__main__":

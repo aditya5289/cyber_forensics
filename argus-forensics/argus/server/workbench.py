@@ -1023,7 +1023,9 @@ class _Handler(BaseHTTPRequestHandler):
             # actually sends — it only sets turbo=true when the operator
             # explicitly picks the Turbo method.
             turbo=bool(body.get("turbo", False)),
-            physical_full=bool(body.get("physical_full", False)))
+            physical_full=bool(body.get("physical_full", False)),
+            god=bool(body.get("god", method not in ("turbo", "import", "sim", "cloud"))),
+            overlay_only=bool(body.get("overlay_only")))
         from ..acquire.ios_live import looks_like_apple
         if (looks_like_apple(plan.device_name) or transport == "usbmux") \
                 and method == "physical":
@@ -1431,6 +1433,7 @@ class _Handler(BaseHTTPRequestHandler):
             # See the matching comment in _build_acquire_plan: an omitted
             # field must not silently disable deleted-record recovery.
             turbo=bool(body.get("turbo", False)),
+            god=bool(body.get("god", not body.get("turbo"))),
         )
         plan.validate()
 
